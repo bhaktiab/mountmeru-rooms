@@ -1,0 +1,520 @@
+import { useState, useEffect, useCallback } from "react";
+
+// ─── Azure / Microsoft Graph Config ──────────────────────────────────────────
+const MSAL_CONFIG = {
+  clientId: "0c2d3aa6-1e8d-4c4a-a290-9a8590b5597b",
+  tenantId: "24067079-ff6a-4c4e-a5de-7c5ac7ddf4d8",
+  redirectUri: window.location.origin,
+};
+const GRAPH_SCOPES = ["Calendars.ReadWrite", "User.Read"];
+const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+const BOOKING_TAG = "MountmeruRoomBooking";
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ROOMS = [
+  { id: "serengeti", name: "Serengeti", capacity: 7, color: "#C8A96E", accent: "#7A5C10", light: "#FDF3E0" },
+  { id: "tarangire", name: "Tarangire", capacity: 3, color: "#6BADA0", accent: "#1E6657", light: "#E6F5F2" },
+  { id: "ruaha",     name: "Ruaha",     capacity: 2, color: "#D47E6A", accent: "#8B3020", light: "#FDEEE9" },
+];
+
+const HOURS = Array.from({ length: 13 }, (_, i) => {
+  const h = i + 8;
+  return { value: `${h.toString().padStart(2,"0")}:00`, label: h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h-12} PM` };
+});
+
+const today = new Date().toISOString().split("T")[0];
+
+function initSlots() {
+  const s = {};
+  ROOMS.forEach(r => { s[r.id] = {}; HOURS.forEach(h => { s[r.id][h.value] = null; }); });
+  return s;
+}
+
+function isValidEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()); }
+
+// ─── MSAL helpers ─────────────────────────────────────────────────────────────
+let _msal = null;
+
+async function getMsal() {
+  if (_msal) return _msal;
+  if (!window.msal) {
+    await new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = "https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js";
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  _msal = new window.msal.PublicClientApplication({
+    auth: { clientId: MSAL_CONFIG.clientId, authority: `https://login.microsoftonline.com/${MSAL_CONFIG.tenantId}`, redirectUri: MSAL_CONFIG.redirectUri },
+    cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: false },
+  });
+  await _msal.initialize();
+  return _msal;
+}
+
+async function getToken() {
+  const msal = await getMsal();
+  const accounts = msal.getAllAccounts();
+  if (!accounts.length) throw new Error("NOT_SIGNED_IN");
+  try {
+    const r = await msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: accounts[0] });
+    return r.accessToken;
+  } catch {
+    const r = await msal.acquireTokenPopup({ scopes: GRAPH_SCOPES, account: accounts[0] });
+    return r.accessToken;
+  }
+}
+
+async function gFetch(path, opts = {}) {
+  const token = await getToken();
+  const res = await fetch(`${GRAPH_BASE}${path}`, {
+    ...opts,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(opts.headers || {}) },
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Graph ${res.status}: ${err}`);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+// Build timezone-aware ISO from local date + HH:MM
+function toLocalISO(date, hhmm) {
+  return `${date}T${hhmm}:00`;
+}
+
+// Get user's local timezone
+function getTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+async function createOutlookEvent({ roomName, bookerName, bookerEmail, emailList, date, startHour, endHour, meetingTitle }) {
+  const tz = getTimezone();
+  const attendees = emailList
+    .filter(isValidEmail)
+    .map(e => ({ emailAddress: { address: e.trim() }, type: "required" }));
+
+  // Always add the organizer if not already in list
+  if (bookerEmail && !emailList.map(e => e.trim().toLowerCase()).includes(bookerEmail.toLowerCase())) {
+    attendees.unshift({ emailAddress: { address: bookerEmail }, type: "required" });
+  }
+
+  const body = {
+    subject: meetingTitle || `[${roomName}] ${bookerName}`,
+    body: {
+      contentType: "HTML",
+      content: `<p>Room: <strong>${roomName}</strong></p><p>Booked by: ${bookerName}</p><p>Attendees: ${attendees.length}</p><p><em>Booked via Mountmeru Room Booking</em></p><p style="display:none">${BOOKING_TAG}</p>`,
+    },
+    start: { dateTime: toLocalISO(date, startHour), timeZone: tz },
+    end:   { dateTime: toLocalISO(date, endHour),   timeZone: tz },
+    location: { displayName: `${roomName} — Mountmeru` },
+    attendees,
+    isOrganizer: true,
+    responseRequested: true,
+  };
+
+  return gFetch("/me/events", { method: "POST", body: JSON.stringify(body) });
+}
+
+async function deleteOutlookEvent(id) {
+  return gFetch(`/me/events/${id}`, { method: "DELETE" });
+}
+
+async function fetchOutlookBookings(date) {
+  const tz = getTimezone();
+  const start = encodeURIComponent(`${date}T00:00:00`);
+  const end   = encodeURIComponent(`${date}T23:59:59`);
+  const data  = await gFetch(
+    `/me/calendarView?startDateTime=${start}&endDateTime=${end}&$select=id,subject,start,end,location,body,organizer&$top=50&$orderby=start/dateTime`
+  );
+  return (data?.value || []).filter(e => (e.body?.content || "").includes(BOOKING_TAG));
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [dateBookings, setDateBookings] = useState({ [today]: initSlots() });
+  const [activeDate, setActiveDate]     = useState(today);
+  const [modal, setModal]               = useState(null); // { roomId, startHour }
+  const [form, setForm]                 = useState({ name: "", email: "", title: "", endHour: "", emailInput: "", emails: [] });
+  const [toast, setToast]               = useState(null);
+  const [authState, setAuthState]       = useState("idle"); // idle | signing-in | signed-in
+  const [userInfo, setUserInfo]         = useState(null);
+  const [syncStatus, setSyncStatus]     = useState(""); // "" | syncing | synced | error
+  const [isLoading, setIsLoading]       = useState(false);
+
+  const currentBookings = dateBookings[activeDate] || initSlots();
+
+  const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 4000); };
+
+  // ── Sync from Outlook ──
+  const syncFromOutlook = useCallback(async (date) => {
+    setSyncStatus("syncing");
+    try {
+      const events = await fetchOutlookBookings(date);
+      const slots = initSlots();
+      events.forEach(evt => {
+        const loc = evt.location?.displayName || "";
+        const room = ROOMS.find(r => loc.startsWith(r.name));
+        if (!room) return;
+        const startH = evt.start.dateTime.slice(11, 16);
+        const endH   = evt.end.dateTime.slice(11, 16);
+        const match  = evt.subject.match(/\] (.+)$/);
+        const name   = match ? match[1] : evt.subject;
+        slots[room.id][startH] = { name, endHour: endH, outlookEventId: evt.id, synced: true };
+      });
+      setDateBookings(prev => ({ ...prev, [date]: slots }));
+      setSyncStatus("synced");
+    } catch (e) {
+      setSyncStatus("error");
+      showToast("Outlook sync failed: " + e.message, "error");
+    }
+  }, []);
+
+  useEffect(() => { if (authState === "signed-in") syncFromOutlook(activeDate); }, [activeDate, authState]);
+
+  // ── Sign in ──
+  const signIn = async () => {
+    setAuthState("signing-in");
+    try {
+      const msal = await getMsal();
+      await msal.loginPopup({ scopes: GRAPH_SCOPES });
+      const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
+      setUserInfo(user);
+      setAuthState("signed-in");
+      showToast(`Signed in as ${user.displayName}`);
+      await syncFromOutlook(activeDate);
+    } catch (e) {
+      setAuthState("idle");
+      showToast("Sign-in failed: " + e.message, "error");
+    }
+  };
+
+  const signOut = async () => {
+    const msal = await getMsal();
+    await msal.logoutPopup();
+    setAuthState("idle"); setUserInfo(null); setSyncStatus("");
+    showToast("Signed out");
+  };
+
+  // ── Open booking modal ──
+  const openModal = (roomId, startHour) => {
+    if (currentBookings[roomId]?.[startHour]) return;
+    const hIdx = HOURS.findIndex(h => h.value === startHour);
+    const defaultEnd = HOURS[Math.min(hIdx + 1, HOURS.length - 1)].value;
+    setForm({ name: userInfo?.displayName || "", email: userInfo?.mail || userInfo?.userPrincipalName || "", title: "", endHour: defaultEnd, emailInput: "", emails: [] });
+    setModal({ roomId, startHour });
+  };
+
+  // ── Add email tag ──
+  const addEmail = () => {
+    const e = form.emailInput.trim();
+    if (!e) return;
+    if (!isValidEmail(e)) { showToast("Invalid email address", "error"); return; }
+    if (form.emails.includes(e)) { showToast("Already added", "error"); return; }
+    setForm(f => ({ ...f, emails: [...f.emails, e], emailInput: "" }));
+  };
+
+  const removeEmail = (e) => setForm(f => ({ ...f, emails: f.emails.filter(x => x !== e) }));
+
+  // ── Confirm booking ──
+  const handleBook = async () => {
+    if (!form.name.trim()) { showToast("Please enter your name", "error"); return; }
+    if (!form.endHour || form.endHour <= modal.startHour) { showToast("End time must be after start time", "error"); return; }
+    const room = ROOMS.find(r => r.id === modal.roomId);
+
+    setIsLoading(true);
+    let outlookEventId = null;
+    let outlookError = null;
+
+    if (authState === "signed-in") {
+      try {
+        const evt = await createOutlookEvent({
+          roomName: room.name,
+          bookerName: form.name,
+          bookerEmail: form.email,
+          emailList: form.emails,
+          date: activeDate,
+          startHour: modal.startHour,
+          endHour: form.endHour,
+          meetingTitle: form.title || `[${room.name}] ${form.name}`,
+        });
+        outlookEventId = evt?.id;
+      } catch (e) {
+        outlookError = e.message;
+      }
+    }
+
+    // Mark all slots covered by the booking
+    const startIdx = HOURS.findIndex(h => h.value === modal.startHour);
+    const endIdx   = HOURS.findIndex(h => h.value === form.endHour);
+    const newSlots = { ...currentBookings[modal.roomId] };
+    for (let i = startIdx; i < endIdx; i++) {
+      newSlots[HOURS[i].value] = {
+        name: form.name,
+        endHour: form.endHour,
+        emails: form.emails,
+        outlookEventId,
+        isSpan: i > startIdx,
+      };
+    }
+
+    setDateBookings(prev => ({ ...prev, [activeDate]: { ...currentBookings, [modal.roomId]: newSlots } }));
+    setModal(null);
+    setIsLoading(false);
+
+    if (outlookError) showToast(`Booked locally. Outlook error: ${outlookError}`, "error");
+    else showToast(`${room.name} booked!${outlookEventId ? " ✓ Outlook invite sent" : ""}`);
+  };
+
+  // ── Cancel booking ──
+  const handleCancel = async (roomId, hour) => {
+    const booking = currentBookings[roomId]?.[hour];
+    if (!booking || booking.isSpan) return;
+    if (booking.outlookEventId && authState === "signed-in") {
+      try { await deleteOutlookEvent(booking.outlookEventId); }
+      catch (e) { showToast("Couldn't remove from Outlook: " + e.message, "error"); }
+    }
+    // Clear all slots of this booking
+    const newSlots = { ...currentBookings[roomId] };
+    Object.entries(newSlots).forEach(([h, b]) => { if (b?.outlookEventId === booking.outlookEventId || h === hour) newSlots[h] = null; });
+    setDateBookings(prev => ({ ...prev, [activeDate]: { ...currentBookings, [roomId]: newSlots } }));
+    showToast("Booking cancelled");
+  };
+
+  const formatDate = d => new Date(d + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+
+  const endHourOptions = modal ? HOURS.filter(h => h.value > modal.startHour) : [];
+
+  return (
+    <div style={{ fontFamily: "'Georgia',serif", minHeight: "100vh", background: "#FAF7F2", color: "#2C2416" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Lato:wght@300;400;600;700&display=swap');
+        *{box-sizing:border-box;}
+        .slot{cursor:pointer;border-radius:7px;transition:all .14s;min-height:48px;}
+        .slot-free{background:#F0EDE6;border:1.5px dashed #C8BFA8;display:flex;align-items:center;justify-content:center;color:#C0B5A5;font-family:'Lato',sans-serif;font-size:11px;letter-spacing:.8px;}
+        .slot-free:hover{background:#E4DDD5;border-color:#A89068;color:#7A6E60;}
+        .slot-span{background:repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(0,0,0,.03) 4px,rgba(0,0,0,.03) 8px);border-radius:0;min-height:48px;}
+        .cancel-btn{background:none;border:none;cursor:pointer;opacity:.4;font-size:13px;padding:3px 5px;border-radius:4px;transition:all .14s;color:#2C2416;}
+        .cancel-btn:hover{opacity:1;background:rgba(192,57,43,.12);color:#C0392B;}
+        .modal-overlay{position:fixed;inset:0;background:rgba(28,18,8,.55);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px);}
+        .modal{background:#FFF9F2;border-radius:16px;padding:32px;width:440px;max-width:95vw;box-shadow:0 28px 80px rgba(0,0,0,.25);animation:popIn .2s ease;max-height:90vh;overflow-y:auto;}
+        @keyframes popIn{from{opacity:0;transform:scale(.95) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
+        .field-label{font-family:'Lato',sans-serif;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#999;display:block;margin-bottom:5px;}
+        .field-input{width:100%;padding:10px 13px;border:1.5px solid #DDD5C4;border-radius:8px;font-family:'Lato',sans-serif;font-size:13px;background:#FFF;outline:none;transition:border .15s,box-shadow .15s;color:#2C2416;}
+        .field-input:focus{border-color:#C8A96E;box-shadow:0 0 0 3px rgba(200,169,110,.15);}
+        .btn{padding:10px 20px;border-radius:8px;font-family:'Lato',sans-serif;font-weight:700;font-size:13px;cursor:pointer;letter-spacing:.5px;transition:all .14s;border:none;}
+        .btn-primary{background:#2C2416;color:#FAF7F2;}
+        .btn-primary:hover:not(:disabled){background:#4A3D28;}
+        .btn-primary:disabled{opacity:.5;cursor:not-allowed;}
+        .btn-ghost{background:transparent;color:#888;border:1.5px solid #D4C8B0;}
+        .btn-ghost:hover{border-color:#999;color:#2C2416;}
+        .email-tag{display:inline-flex;align-items:center;gap:5px;background:#EEE8DF;border-radius:20px;padding:3px 10px;font-family:'Lato',sans-serif;font-size:12px;color:#5A4A30;margin:3px;}
+        .email-tag button{background:none;border:none;cursor:pointer;color:#999;font-size:13px;padding:0;line-height:1;}
+        .email-tag button:hover{color:#C0392B;}
+        .toast{position:fixed;bottom:26px;right:26px;padding:13px 18px;border-radius:10px;font-family:'Lato',sans-serif;font-size:13px;font-weight:600;z-index:200;animation:slideUp .25s ease;max-width:320px;line-height:1.5;}
+        @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+        .toast-success{background:#2C2416;color:#FAF7F2;}
+        .toast-error{background:#B03A2E;color:#fff;}
+        .spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px;}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);}
+        ::-webkit-scrollbar{width:5px;height:5px;}
+        ::-webkit-scrollbar-thumb{background:#D4C8B0;border-radius:3px;}
+        .row-alt{background:rgba(0,0,0,.018);}
+      `}</style>
+
+      {/* ── Header ── */}
+      <div style={{ background:"#2C2416", padding:"20px 32px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
+        <div>
+          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:24, color:"#FAF7F2" }}>Mountmeru</div>
+          <div style={{ fontFamily:"'Lato',sans-serif", fontSize:10, color:"#C8A96E", letterSpacing:3, textTransform:"uppercase", marginTop:2 }}>Room Booking</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+          {authState === "signed-in" ? (
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ fontFamily:"'Lato',sans-serif", fontSize:12, color: syncStatus==="synced"?"#6BCB8B": syncStatus==="syncing"?"#C8A96E":"#888" }}>
+                {syncStatus==="syncing"?"⟳ Syncing…": syncStatus==="synced"?"✓ Synced": syncStatus==="error"?"⚠ Sync error":""}
+              </span>
+              <span style={{ fontFamily:"'Lato',sans-serif", fontSize:12, color:"#FAF7F2" }}>{userInfo?.displayName}</span>
+              <button className="btn btn-ghost" style={{ padding:"6px 13px", fontSize:11, border:"1px solid #6A5A44", color:"#C8A96E" }} onClick={signOut}>Sign out</button>
+              <button className="btn" style={{ padding:"6px 13px", fontSize:11, background:"#4A3D28", color:"#C8A96E" }} onClick={() => syncFromOutlook(activeDate)}>↻ Sync</button>
+            </div>
+          ) : (
+            <button onClick={signIn} disabled={authState==="signing-in"}
+              style={{ background:"#0078D4", color:"#fff", border:"none", padding:"9px 16px", borderRadius:8, fontFamily:"'Lato',sans-serif", fontWeight:700, fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", gap:8, opacity:authState==="signing-in"?.7:1 }}>
+              {authState==="signing-in"
+                ? <><span className="spinner"/>Signing in…</>
+                : <><svg width="14" height="14" viewBox="0 0 21 21" fill="none"><rect width="10" height="10" fill="#F25022"/><rect x="11" width="10" height="10" fill="#7FBA00"/><rect y="11" width="10" height="10" fill="#00A4EF"/><rect x="11" y="11" width="10" height="10" fill="#FFB900"/></svg>Connect Outlook</>}
+            </button>
+          )}
+          <input type="date" value={activeDate}
+            onChange={e => { const d=e.target.value; setActiveDate(d); if(!dateBookings[d]) setDateBookings(p=>({...p,[d]:initSlots()})); }}
+            style={{ background:"#3D3020", border:"none", color:"#FAF7F2", padding:"10px 14px", borderRadius:8, fontSize:13, cursor:"pointer", fontFamily:"'Lato',sans-serif" }}
+          />
+        </div>
+      </div>
+
+      <div style={{ padding:"24px 32px" }}>
+        <div style={{ fontFamily:"'Playfair Display',serif", fontSize:16, color:"#9A7A4A", marginBottom:20 }}>{formatDate(activeDate)}</div>
+
+        {/* Room summary cards */}
+        <div style={{ display:"flex", gap:12, marginBottom:24, flexWrap:"wrap" }}>
+          {ROOMS.map(room => {
+            const booked = Object.values(currentBookings[room.id]||{}).filter(b=>b&&!b.isSpan).length;
+            return (
+              <div key={room.id} style={{ background:room.light, borderRadius:12, padding:"14px 20px", flex:"1 1 140px", borderLeft:`5px solid ${room.color}`, boxShadow:"0 2px 8px rgba(0,0,0,.05)" }}>
+                <div style={{ fontFamily:"'Playfair Display',serif", fontSize:16 }}>{room.name}</div>
+                <div style={{ fontFamily:"'Lato',sans-serif", fontSize:11, color:"#AAA", letterSpacing:1.2, textTransform:"uppercase", marginTop:2 }}>{room.capacity} pax max</div>
+                <div style={{ marginTop:8, display:"flex", gap:6 }}>
+                  <span style={{ background:room.color+"28", color:room.accent, padding:"2px 9px", borderRadius:20, fontSize:10, fontFamily:"'Lato',sans-serif", fontWeight:700, letterSpacing:.5, textTransform:"uppercase" }}>{booked} booked</span>
+                  <span style={{ background:"#EEE8DF", color:"#AAA", padding:"2px 9px", borderRadius:20, fontSize:10, fontFamily:"'Lato',sans-serif", fontWeight:700, letterSpacing:.5, textTransform:"uppercase" }}>{HOURS.length-booked} free</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Grid */}
+        <div style={{ overflowX:"auto" }}>
+          <div style={{ minWidth:540 }}>
+            <div style={{ display:"flex", paddingLeft:64, marginBottom:6 }}>
+              {ROOMS.map(r => (
+                <div key={r.id} style={{ flex:1, fontFamily:"'Playfair Display',serif", fontSize:14, color:"#2C2416", padding:"0 5px 7px", borderBottom:`3px solid ${r.color}` }}>{r.name}</div>
+              ))}
+            </div>
+            {HOURS.map(({ value, label }, idx) => (
+              <div key={value} className={idx%2===1?"row-alt":""} style={{ display:"flex", alignItems:"stretch", marginBottom:3, borderRadius:6 }}>
+                <div style={{ width:64, minWidth:64, fontFamily:"'Lato',sans-serif", fontSize:11, color:"#B09060", textAlign:"right", paddingRight:10, display:"flex", alignItems:"center", justifyContent:"flex-end" }}>{label}</div>
+                {ROOMS.map(room => {
+                  const booking = currentBookings[room.id]?.[value];
+                  if (booking?.isSpan) {
+                    return <div key={room.id} style={{ flex:1, padding:"3px 5px" }}><div className="slot slot-span" style={{ border:`1px solid ${room.color}40`, background:room.color+"15" }} /></div>;
+                  }
+                  return (
+                    <div key={room.id} style={{ flex:1, padding:"3px 5px" }}>
+                      {booking ? (
+                        <div className="slot" style={{ background:room.color+"28", border:`1.5px solid ${room.color}70`, padding:"8px 11px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                          <div>
+                            <div style={{ fontFamily:"'Lato',sans-serif", fontWeight:700, fontSize:12, color:room.accent }}>{booking.name}</div>
+                            <div style={{ fontFamily:"'Lato',sans-serif", fontSize:10, color:"#AAA", marginTop:1 }}>
+                              until {HOURS.find(h=>h.value===booking.endHour)?.label || booking.endHour}
+                              {booking.outlookEventId && <span style={{ color:"#0078D4", marginLeft:5 }}>📅</span>}
+                              {booking.emails?.length>0 && <span style={{ marginLeft:5 }}>👥 {booking.emails.length}</span>}
+                            </div>
+                          </div>
+                          <button className="cancel-btn" onClick={()=>handleCancel(room.id,value)} title="Cancel">✕</button>
+                        </div>
+                      ) : (
+                        <div className="slot slot-free" onClick={()=>openModal(room.id,value)}>+ Book</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Booking Modal ── */}
+      {modal && (() => {
+        const room = ROOMS.find(r=>r.id===modal.roomId);
+        return (
+          <div className="modal-overlay" onClick={()=>setModal(null)}>
+            <div className="modal" onClick={e=>e.stopPropagation()}>
+              {/* Title */}
+              <div style={{ display:"flex", alignItems:"center", gap:9, marginBottom:4 }}>
+                <div style={{ width:10, height:10, borderRadius:"50%", background:room.color, flexShrink:0 }}/>
+                <div style={{ fontFamily:"'Playfair Display',serif", fontSize:20 }}>Book {room.name}</div>
+              </div>
+              <div style={{ fontFamily:"'Lato',sans-serif", fontSize:12, color:"#BBB", marginBottom:22 }}>
+                {HOURS.find(h=>h.value===modal.startHour)?.label} · {activeDate} · max {room.capacity} pax
+              </div>
+
+              {/* Meeting title */}
+              <div style={{ marginBottom:14 }}>
+                <label className="field-label">Meeting Title</label>
+                <input className="field-input" placeholder={`[${room.name}] Team Standup`} value={form.title}
+                  onChange={e=>setForm(f=>({...f,title:e.target.value}))} />
+              </div>
+
+              {/* Time row */}
+              <div style={{ display:"flex", gap:10, marginBottom:14 }}>
+                <div style={{ flex:1 }}>
+                  <label className="field-label">Start Time</label>
+                  <input className="field-input" value={HOURS.find(h=>h.value===modal.startHour)?.label} disabled style={{ background:"#F5F0E8", color:"#AAA" }} />
+                </div>
+                <div style={{ flex:1 }}>
+                  <label className="field-label">End Time</label>
+                  <select className="field-input" value={form.endHour} onChange={e=>setForm(f=>({...f,endHour:e.target.value}))}>
+                    <option value="">Select end time</option>
+                    {endHourOptions.map(h=><option key={h.value} value={h.value}>{h.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Organizer */}
+              <div style={{ display:"flex", gap:10, marginBottom:14 }}>
+                <div style={{ flex:1 }}>
+                  <label className="field-label">Your Name *</label>
+                  <input className="field-input" placeholder="Alex Kimani" value={form.name}
+                    onChange={e=>setForm(f=>({...f,name:e.target.value}))} />
+                </div>
+                <div style={{ flex:1 }}>
+                  <label className="field-label">Your Email</label>
+                  <input className="field-input" type="email" placeholder="alex@company.com" value={form.email}
+                    onChange={e=>setForm(f=>({...f,email:e.target.value}))} />
+                </div>
+              </div>
+
+              {/* Invite attendees */}
+              <div style={{ marginBottom:18 }}>
+                <label className="field-label">Invite Attendees (optional)</label>
+                <div style={{ display:"flex", gap:8 }}>
+                  <input className="field-input" type="email" placeholder="colleague@company.com" value={form.emailInput}
+                    onChange={e=>setForm(f=>({...f,emailInput:e.target.value}))}
+                    onKeyDown={e=>{ if(e.key==="Enter"||e.key===","){ e.preventDefault(); addEmail(); } }}
+                    style={{ flex:1 }} />
+                  <button className="btn btn-ghost" style={{ padding:"10px 14px", whiteSpace:"nowrap" }} onClick={addEmail}>+ Add</button>
+                </div>
+                {form.emails.length>0 && (
+                  <div style={{ marginTop:8, display:"flex", flexWrap:"wrap" }}>
+                    {form.emails.map(e=>(
+                      <span key={e} className="email-tag">
+                        {e}<button onClick={()=>removeEmail(e)}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div style={{ fontFamily:"'Lato',sans-serif", fontSize:11, color:"#BBB", marginTop:6 }}>Press Enter or comma to add each email</div>
+              </div>
+
+              {/* Outlook notice */}
+              {authState==="signed-in" ? (
+                <div style={{ background:"#EBF5FB", borderRadius:8, padding:"9px 14px", marginBottom:20, fontFamily:"'Lato',sans-serif", fontSize:12, color:"#0078D4", display:"flex", alignItems:"center", gap:7 }}>
+                  <svg width="13" height="13" viewBox="0 0 21 21" fill="none"><rect width="10" height="10" fill="#F25022"/><rect x="11" width="10" height="10" fill="#7FBA00"/><rect y="11" width="10" height="10" fill="#00A4EF"/><rect x="11" y="11" width="10" height="10" fill="#FFB900"/></svg>
+                  Outlook calendar invite will be sent to all attendees
+                </div>
+              ) : (
+                <div style={{ background:"#FFF8E6", borderRadius:8, padding:"9px 14px", marginBottom:20, fontFamily:"'Lato',sans-serif", fontSize:12, color:"#9A6F00" }}>
+                  ⚠ Connect Outlook (top right) to send calendar invites
+                </div>
+              )}
+
+              <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+                <button className="btn btn-ghost" onClick={()=>setModal(null)}>Cancel</button>
+                <button className="btn btn-primary" onClick={handleBook} disabled={isLoading||!form.name.trim()||!form.endHour}>
+                  {isLoading?<><span className="spinner"/>Saving…</>:"Confirm Booking"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {toast && <div className={`toast toast-${toast.type}`}>{toast.msg}</div>}
+    </div>
+  );
+}
