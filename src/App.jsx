@@ -51,7 +51,7 @@ function isInTeams() {
   } catch { return true; }
 }
 
-// ─── MSAL (shared browser + Teams) ───────────────────────────────────────────
+// ─── MSAL (browser only) ──────────────────────────────────────────────────────
 let _msal = null;
 
 async function getMsal() {
@@ -61,64 +61,60 @@ async function getMsal() {
       clientId: MSAL_CONFIG.clientId,
       authority: `https://login.microsoftonline.com/${MSAL_CONFIG.tenantId}`,
       redirectUri: MSAL_CONFIG.redirectUri,
-      // blank.html is used by ssoSilent for the hidden iframe — must be registered in Azure
-      navigateToLoginRequestUrl: false,
     },
     cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: false },
-    system: { allowNativeBroker: false, iframeHashTimeout: 10000 },
+    system: { allowNativeBroker: false },
   });
   await _msal.initialize();
   return _msal;
 }
 
-// Extract login_hint from Teams context so MSAL can sign in silently
-async function getTeamsLoginHint() {
-  return new Promise((resolve) => {
-    try {
-      // Teams JS SDK v2 loaded via CDN in teams-config.html; may already be present
-      const sdk = window.microsoftTeams;
-      if (!sdk) { resolve(null); return; }
-      sdk.app.getContext().then(ctx => {
-        resolve(ctx?.user?.loginHint || ctx?.loginHint || null);
-      }).catch(() => resolve(null));
-    } catch { resolve(null); }
+// Load Teams SDK (if not already loaded)
+let _teamsReady = false;
+async function initTeamsSDK() {
+  if (_teamsReady) return;
+  if (!window.microsoftTeams) {
+    await new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = "https://res.cdn.office.net/teams-js/2.22.0/js/MicrosoftTeams.min.js";
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  await window.microsoftTeams.app.initialize();
+  _teamsReady = true;
+}
+
+// Teams auth — opens a Teams-managed popup to auth-teams.html which does the OAuth flow
+async function teamsAuthenticate() {
+  await initTeamsSDK();
+  return new Promise((resolve, reject) => {
+    window.microsoftTeams.authentication.authenticate({
+      url: `${MSAL_CONFIG.redirectUri}/auth-teams.html`,
+      width: 600,
+      height: 640,
+      successCallback: resolve,   // receives accessToken from notifySuccess
+      failureCallback: reject,
+    });
   });
 }
 
+// In-memory token cache for Teams session
+let _teamsToken = null;
+let _teamsTokenExpiry = 0;
+
 async function getToken() {
-  const msal = await getMsal();
-
   if (isInTeams()) {
-    const loginHint = await getTeamsLoginHint();
-    const accounts = msal.getAllAccounts();
-    const account = loginHint
-      ? accounts.find(a => a.username?.toLowerCase() === loginHint.toLowerCase()) || accounts[0]
-      : accounts[0];
-
-    // 1st attempt: silent with existing cached account
-    if (account) {
-      try {
-        const r = await msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
-        return r.accessToken;
-      } catch { /* fall through */ }
-    }
-
-    // 2nd attempt: ssoSilent via hidden iframe — requires blank.html registered in Azure
-    try {
-      const ssoRequest = {
-        scopes: GRAPH_SCOPES,
-        redirectUri: `${MSAL_CONFIG.redirectUri}/blank.html`,
-      };
-      if (loginHint) ssoRequest.loginHint = loginHint;
-      const r = await msal.ssoSilent(ssoRequest);
-      return r.accessToken;
-    } catch(e) {
-      // ssoSilent failed — user needs to click Connect Outlook
-      throw new Error("NOT_SIGNED_IN");
-    }
+    // Return cached token if still valid (with 2min buffer)
+    if (_teamsToken && Date.now() < _teamsTokenExpiry - 120000) return _teamsToken;
+    // Open Teams-managed auth popup
+    _teamsToken = await teamsAuthenticate();
+    _teamsTokenExpiry = Date.now() + 3600000; // 1hr
+    return _teamsToken;
   }
 
   // Browser: standard MSAL flow
+  const msal = await getMsal();
   const accounts = msal.getAllAccounts();
   if (!accounts.length) throw new Error("NOT_SIGNED_IN");
   try {
@@ -217,20 +213,10 @@ export default function App() {
     (async () => {
       try {
         if (isInTeams()) {
-          // Auto-SSO in Teams — try ssoSilent, fall back gracefully to showing Connect button
-          try {
-            const token = await getToken();
-            const res = await fetch(`${GRAPH_BASE}/me?$select=displayName,mail,userPrincipalName`, {
-              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
-            });
-            const user = await res.json();
-            setUserInfo(user);
-            setAuthState("signed-in");
-          } catch(e) {
-            // Silent SSO not yet possible — user will see Connect Outlook button
-            setAuthState("idle");
-            return;
-          }
+          // In Teams: don't auto-attempt auth on load (popup requires user gesture)
+          // User will click Connect Outlook which triggers the Teams auth popup
+          setAuthState("idle");
+          return;
         } else {
           // Browser: check for existing MSAL session or redirect result
           const msal = await getMsal();
@@ -286,22 +272,21 @@ export default function App() {
   const signIn = async () => {
     setAuthState("signing-in");
     try {
-      if (isInTeams()) {
-        // In Teams: use MSAL ssoSilent — no popup or redirect
-        const token = await getToken(); // getToken handles ssoSilent internally
-        const res = await fetch(`${GRAPH_BASE}/me?$select=displayName,mail,userPrincipalName`, {
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
-        });
-        const user = await res.json();
-        setUserInfo(user);
-        setAuthState("signed-in");
-        showToast(`Signed in as ${user.displayName}`);
-        await syncFromOutlook(activeDate);
-      } else {
-        const msal = await getMsal();
-        await msal.loginRedirect({ scopes: GRAPH_SCOPES });
-      }
+      // getToken() handles both Teams popup auth and browser redirect
+      const token = await getToken();
+      const res = await fetch(`${GRAPH_BASE}/me?$select=displayName,mail,userPrincipalName`, {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+      });
+      const user = await res.json();
+      setUserInfo(user);
+      setAuthState("signed-in");
+      showToast(`Signed in as ${user.displayName}`);
+      await syncFromOutlook(activeDate);
     } catch (e) {
+      if (!isInTeams()) {
+        // Browser redirect — page navigates away, not an error
+        return;
+      }
       setAuthState("idle");
       showToast("Sign-in failed: " + e.message, "error");
     }
