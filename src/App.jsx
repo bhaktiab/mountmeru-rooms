@@ -39,7 +39,7 @@ function initSlots() {
 
 function isValidEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()); }
 
-// Detect if running inside Microsoft Teams iframe
+// ─── Teams detection ──────────────────────────────────────────────────────────
 function isInTeams() {
   try {
     return (
@@ -48,10 +48,56 @@ function isInTeams() {
       window.name === "embedded-page-container" ||
       window.name === "extension-tab-frame"
     );
-  } catch { return true; } // cross-origin frame check throws = we're in an iframe
+  } catch { return true; }
 }
 
-// ─── MSAL helpers ─────────────────────────────────────────────────────────────
+// Load Teams JS SDK dynamically (only when needed)
+let _teamsInitialized = false;
+async function initTeamsSDK() {
+  if (_teamsInitialized) return;
+  if (!window.microsoftTeams) {
+    await new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = "https://res.cdn.office.net/teams-js/2.22.0/js/MicrosoftTeams.min.js";
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  await window.microsoftTeams.app.initialize();
+  _teamsInitialized = true;
+}
+
+// Get token via Teams SSO (no popup/redirect needed)
+async function getTeamsSSOToken() {
+  await initTeamsSDK();
+  return new Promise((resolve, reject) => {
+    window.microsoftTeams.authentication.getAuthToken({
+      successCallback: resolve,
+      failureCallback: reject,
+    });
+  });
+}
+
+// Exchange Teams SSO token for Graph token via OBO flow
+async function exchangeTokenForGraph(ssoToken) {
+  const params = new URLSearchParams({
+    grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+    client_id: MSAL_CONFIG.clientId,
+    client_secret: "", // leave blank — public SPA client
+    assertion: ssoToken,
+    requested_token_use: "on_behalf_of",
+    scope: GRAPH_SCOPES.join(" "),
+  });
+  const res = await fetch(
+    `https://login.microsoftonline.com/${MSAL_CONFIG.tenantId}/oauth2/v2.0/token`,
+    { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params }
+  );
+  const data = await res.json();
+  if (data.access_token) return data.access_token;
+  throw new Error(data.error_description || "OBO exchange failed");
+}
+
+// ─── MSAL helpers (browser only) ──────────────────────────────────────────────
 let _msal = null;
 
 async function getMsal() {
@@ -65,6 +111,16 @@ async function getMsal() {
 }
 
 async function getToken() {
+  // In Teams: use SSO token exchange (no popup/redirect)
+  if (isInTeams()) {
+    try {
+      const ssoToken = await getTeamsSSOToken();
+      return await exchangeTokenForGraph(ssoToken);
+    } catch(e) {
+      throw new Error("Teams SSO failed: " + e);
+    }
+  }
+  // In browser: use MSAL as before
   const msal = await getMsal();
   const accounts = msal.getAllAccounts();
   if (!accounts.length) throw new Error("NOT_SIGNED_IN");
@@ -72,10 +128,6 @@ async function getToken() {
     const r = await msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: accounts[0] });
     return r.accessToken;
   } catch {
-    if (isInTeams()) {
-      const r = await msal.acquireTokenPopup({ scopes: GRAPH_SCOPES, account: accounts[0] });
-      return r.accessToken;
-    }
     await msal.acquireTokenRedirect({ scopes: GRAPH_SCOPES, account: accounts[0] });
     return null;
   }
@@ -163,27 +215,40 @@ export default function App() {
 
   const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 4000); };
 
-  // ── Handle redirect response on page load ──
+  // ── Handle auth on page load ──
   useEffect(() => {
     (async () => {
       try {
-        const msal = await getMsal();
-        const result = await msal.handleRedirectPromise();
-        if (result?.account) {
-          const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
+        if (isInTeams()) {
+          // Auto-SSO in Teams — sign in silently without any user interaction
+          const ssoToken = await getTeamsSSOToken();
+          const graphToken = await exchangeTokenForGraph(ssoToken);
+          const res = await fetch(`${GRAPH_BASE}/me?$select=displayName,mail,userPrincipalName`, {
+            headers: { Authorization: `Bearer ${graphToken}`, "Content-Type": "application/json" }
+          });
+          const user = await res.json();
           setUserInfo(user);
           setAuthState("signed-in");
-          showToast(`Signed in as ${user.displayName}`);
         } else {
-          const accounts = msal.getAllAccounts();
-          if (accounts.length) {
+          // Browser: check for existing MSAL session or redirect result
+          const msal = await getMsal();
+          const result = await msal.handleRedirectPromise();
+          if (result?.account) {
             const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
             setUserInfo(user);
             setAuthState("signed-in");
+            showToast(`Signed in as ${user.displayName}`);
+          } else {
+            const accounts = msal.getAllAccounts();
+            if (accounts.length) {
+              const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
+              setUserInfo(user);
+              setAuthState("signed-in");
+            }
           }
         }
       } catch (e) {
-        setAuthState("idle");
+        setAuthState("idle"); // SSO failed silently — user can click Connect Outlook
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -219,20 +284,22 @@ export default function App() {
   const signIn = async () => {
     setAuthState("signing-in");
     try {
-      const msal = await getMsal();
       if (isInTeams()) {
-        // Redirect is blocked in iframes (Teams); use popup instead
-        const result = await msal.loginPopup({ scopes: GRAPH_SCOPES });
-        if (result?.account) {
-          const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
-          setUserInfo(user);
-          setAuthState("signed-in");
-          showToast(`Signed in as ${user.displayName}`);
-          await syncFromOutlook(activeDate);
-        }
+        // Teams SSO: silently get token, no popup/redirect needed
+        const ssoToken = await getTeamsSSOToken();
+        const graphToken = await exchangeTokenForGraph(ssoToken);
+        // Fetch user info using the token directly
+        const res = await fetch(`${GRAPH_BASE}/me?$select=displayName,mail,userPrincipalName`, {
+          headers: { Authorization: `Bearer ${graphToken}`, "Content-Type": "application/json" }
+        });
+        const user = await res.json();
+        setUserInfo(user);
+        setAuthState("signed-in");
+        showToast(`Signed in as ${user.displayName}`);
+        await syncFromOutlook(activeDate);
       } else {
+        const msal = await getMsal();
         await msal.loginRedirect({ scopes: GRAPH_SCOPES });
-        // page will reload — result handled in useEffect below
       }
     } catch (e) {
       setAuthState("idle");
@@ -241,10 +308,8 @@ export default function App() {
   };
 
   const signOut = async () => {
-    const msal = await getMsal();
-    if (isInTeams()) {
-      await msal.logoutPopup();
-    } else {
+    if (!isInTeams()) {
+      const msal = await getMsal();
       await msal.logoutRedirect();
     }
     setAuthState("idle"); setUserInfo(null); setSyncStatus("");
