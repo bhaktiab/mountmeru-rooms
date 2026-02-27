@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Authenticating…</title>
   <script src="https://res.cdn.office.net/teams-js/2.22.0/js/MicrosoftTeams.min.js"></script>
-  <script src="https://alcdn.msauth.net/browser/3.27.0/js/msal-browser.min.js"></script>
   <style>
     body { font-family: 'Segoe UI', sans-serif; display: flex; align-items: center;
            justify-content: center; height: 100vh; margin: 0; background: #FAF8F4; }
@@ -14,45 +13,76 @@
                border-top-color: #C8A96E; border-radius: 50%;
                animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .error { color: #c0392b; font-size: 13px; margin-top: 12px; max-width: 320px; }
   </style>
 </head>
 <body>
 <div class="msg">
-  <div class="spinner"></div>
-  <div>Signing you in…</div>
+  <div class="spinner" id="spinner"></div>
+  <div id="status">Signing you in…</div>
+  <div class="error" id="error"></div>
 </div>
 <script>
   const CLIENT_ID = "0c2d3aa6-1e8d-4c4a-a290-9a8590b5597b";
   const TENANT_ID = "24067079-ff6a-4c4e-a5de-7c5ac7ddf4d8";
   const REDIRECT  = "https://mountmeru-rooms.vercel.app/auth-teams.html";
-  const SCOPES    = ["Calendars.ReadWrite", "User.Read"];
+  const SCOPES    = "Calendars.ReadWrite User.Read openid profile";
+
+  function parseHash(hash) {
+    const params = {};
+    hash.replace(/^#/, "").split("&").forEach(p => {
+      const [k, v] = p.split("=");
+      params[decodeURIComponent(k)] = decodeURIComponent(v || "");
+    });
+    return params;
+  }
+
+  function generateNonce() {
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    return Array.from(arr, b => b.toString(16).padStart(2, "0")).join("");
+  }
 
   (async () => {
     await microsoftTeams.app.initialize();
 
-    const msalApp = new msal.PublicClientApplication({
-      auth: {
-        clientId: CLIENT_ID,
-        authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-        redirectUri: REDIRECT,
-      },
-      cache: { cacheLocation: "sessionStorage" },
-    });
-    await msalApp.initialize();
-
-    try {
-      // If returning from Microsoft login redirect, grab the token and notify Teams
-      const result = await msalApp.handleRedirectPromise();
-      if (result?.accessToken) {
-        microsoftTeams.authentication.notifySuccess(result.accessToken);
+    // ── Step 2: Returning from Microsoft with token in hash ──
+    if (window.location.hash && window.location.hash.includes("access_token")) {
+      const params = parseHash(window.location.hash);
+      if (params.access_token) {
+        microsoftTeams.authentication.notifySuccess(params.access_token);
         return;
       }
-
-      // First visit — start the login redirect inside this popup window
-      await msalApp.loginRedirect({ scopes: SCOPES });
-    } catch (e) {
-      microsoftTeams.authentication.notifyFailure(e.message || String(e));
+      if (params.error) {
+        microsoftTeams.authentication.notifyFailure(params.error_description || params.error);
+        return;
+      }
     }
+
+    // Check for error in query string too
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("error")) {
+      microsoftTeams.authentication.notifyFailure(urlParams.get("error_description") || urlParams.get("error"));
+      return;
+    }
+
+    // ── Step 1: First load — redirect to Microsoft login ──
+    const nonce = generateNonce();
+    const state = generateNonce();
+    sessionStorage.setItem("teams_auth_nonce", nonce);
+    sessionStorage.setItem("teams_auth_state", state);
+
+    const authUrl = new URL(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize`);
+    authUrl.searchParams.set("client_id", CLIENT_ID);
+    authUrl.searchParams.set("response_type", "token");
+    authUrl.searchParams.set("redirect_uri", REDIRECT);
+    authUrl.searchParams.set("scope", SCOPES);
+    authUrl.searchParams.set("nonce", nonce);
+    authUrl.searchParams.set("state", state);
+    authUrl.searchParams.set("response_mode", "fragment");
+    authUrl.searchParams.set("prompt", "select_account");
+
+    window.location.href = authUrl.toString();
   })();
 </script>
 </body>

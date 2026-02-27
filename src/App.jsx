@@ -93,8 +93,11 @@ async function teamsAuthenticate() {
       url: `${MSAL_CONFIG.redirectUri}/auth-teams.html`,
       width: 600,
       height: 640,
-      successCallback: resolve,   // receives accessToken from notifySuccess
-      failureCallback: reject,
+      successCallback: (token) => {
+        if (token) resolve(token);
+        else reject(new Error("No token returned from auth popup"));
+      },
+      failureCallback: (reason) => reject(new Error(reason || "Auth popup failed")),
     });
   });
 }
@@ -105,8 +108,8 @@ let _teamsTokenExpiry = 0;
 
 async function getToken() {
   if (isInTeams()) {
-    // Return cached token if still valid (with 2min buffer)
-    if (_teamsToken && Date.now() < _teamsTokenExpiry - 120000) return _teamsToken;
+    // Return cached token if still valid (with 5min buffer)
+    if (_teamsToken && Date.now() < _teamsTokenExpiry - 300000) return _teamsToken;
     // Open Teams-managed auth popup
     _teamsToken = await teamsAuthenticate();
     _teamsTokenExpiry = Date.now() + 3600000; // 1hr
@@ -288,7 +291,8 @@ export default function App() {
         return;
       }
       setAuthState("idle");
-      showToast("Sign-in failed: " + e.message, "error");
+      const msg = e?.message || String(e);
+      showToast("Sign-in failed: " + msg, "error");
     }
   };
 
