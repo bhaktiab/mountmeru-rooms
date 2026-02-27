@@ -51,77 +51,66 @@ function isInTeams() {
   } catch { return true; }
 }
 
-// Load Teams JS SDK dynamically (only when needed)
-let _teamsInitialized = false;
-async function initTeamsSDK() {
-  if (_teamsInitialized) return;
-  if (!window.microsoftTeams) {
-    await new Promise((res, rej) => {
-      const s = document.createElement("script");
-      s.src = "https://res.cdn.office.net/teams-js/2.22.0/js/MicrosoftTeams.min.js";
-      s.onload = res; s.onerror = rej;
-      document.head.appendChild(s);
-    });
-  }
-  await window.microsoftTeams.app.initialize();
-  _teamsInitialized = true;
-}
-
-// Get token via Teams SSO (no popup/redirect needed)
-async function getTeamsSSOToken() {
-  await initTeamsSDK();
-  return new Promise((resolve, reject) => {
-    window.microsoftTeams.authentication.getAuthToken({
-      successCallback: resolve,
-      failureCallback: reject,
-    });
-  });
-}
-
-// Exchange Teams SSO token for Graph token via OBO flow
-async function exchangeTokenForGraph(ssoToken) {
-  const params = new URLSearchParams({
-    grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-    client_id: MSAL_CONFIG.clientId,
-    client_secret: "", // leave blank — public SPA client
-    assertion: ssoToken,
-    requested_token_use: "on_behalf_of",
-    scope: GRAPH_SCOPES.join(" "),
-  });
-  const res = await fetch(
-    `https://login.microsoftonline.com/${MSAL_CONFIG.tenantId}/oauth2/v2.0/token`,
-    { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params }
-  );
-  const data = await res.json();
-  if (data.access_token) return data.access_token;
-  throw new Error(data.error_description || "OBO exchange failed");
-}
-
-// ─── MSAL helpers (browser only) ──────────────────────────────────────────────
+// ─── MSAL (shared browser + Teams) ───────────────────────────────────────────
 let _msal = null;
 
 async function getMsal() {
   if (_msal) return _msal;
   _msal = new PublicClientApplication({
-    auth: { clientId: MSAL_CONFIG.clientId, authority: `https://login.microsoftonline.com/${MSAL_CONFIG.tenantId}`, redirectUri: MSAL_CONFIG.redirectUri },
+    auth: {
+      clientId: MSAL_CONFIG.clientId,
+      authority: `https://login.microsoftonline.com/${MSAL_CONFIG.tenantId}`,
+      redirectUri: MSAL_CONFIG.redirectUri,
+    },
     cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: false },
+    system: { allowNativeBroker: false },
   });
   await _msal.initialize();
   return _msal;
 }
 
-async function getToken() {
-  // In Teams: use SSO token exchange (no popup/redirect)
-  if (isInTeams()) {
+// Extract login_hint from Teams context so MSAL can sign in silently
+async function getTeamsLoginHint() {
+  return new Promise((resolve) => {
     try {
-      const ssoToken = await getTeamsSSOToken();
-      return await exchangeTokenForGraph(ssoToken);
+      // Teams JS SDK v2 loaded via CDN in teams-config.html; may already be present
+      const sdk = window.microsoftTeams;
+      if (!sdk) { resolve(null); return; }
+      sdk.app.getContext().then(ctx => {
+        resolve(ctx?.user?.loginHint || ctx?.loginHint || null);
+      }).catch(() => resolve(null));
+    } catch { resolve(null); }
+  });
+}
+
+async function getToken() {
+  const msal = await getMsal();
+
+  if (isInTeams()) {
+    // Try to get the Teams user's login hint for a silent token request
+    const loginHint = await getTeamsLoginHint();
+    const accounts = msal.getAllAccounts();
+    const account = loginHint
+      ? accounts.find(a => a.username?.toLowerCase() === loginHint.toLowerCase()) || accounts[0]
+      : accounts[0];
+
+    if (account) {
+      try {
+        const r = await msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
+        return r.accessToken;
+      } catch { /* fall through to ssoSilent */ }
+    }
+
+    // ssoSilent: MSAL uses the Teams session cookie to get a token without any UI
+    try {
+      const r = await msal.ssoSilent({ scopes: GRAPH_SCOPES, loginHint: loginHint || undefined });
+      return r.accessToken;
     } catch(e) {
-      throw new Error("Teams SSO failed: " + e);
+      throw new Error("Teams silent SSO failed — ensure app is consented in Azure: " + e.message);
     }
   }
-  // In browser: use MSAL as before
-  const msal = await getMsal();
+
+  // Browser: standard MSAL flow
   const accounts = msal.getAllAccounts();
   if (!accounts.length) throw new Error("NOT_SIGNED_IN");
   try {
@@ -220,11 +209,10 @@ export default function App() {
     (async () => {
       try {
         if (isInTeams()) {
-          // Auto-SSO in Teams — sign in silently without any user interaction
-          const ssoToken = await getTeamsSSOToken();
-          const graphToken = await exchangeTokenForGraph(ssoToken);
+          // Auto-SSO in Teams — MSAL ssoSilent uses the existing Teams session
+          const token = await getToken();
           const res = await fetch(`${GRAPH_BASE}/me?$select=displayName,mail,userPrincipalName`, {
-            headers: { Authorization: `Bearer ${graphToken}`, "Content-Type": "application/json" }
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
           });
           const user = await res.json();
           setUserInfo(user);
@@ -285,12 +273,10 @@ export default function App() {
     setAuthState("signing-in");
     try {
       if (isInTeams()) {
-        // Teams SSO: silently get token, no popup/redirect needed
-        const ssoToken = await getTeamsSSOToken();
-        const graphToken = await exchangeTokenForGraph(ssoToken);
-        // Fetch user info using the token directly
+        // In Teams: use MSAL ssoSilent — no popup or redirect
+        const token = await getToken(); // getToken handles ssoSilent internally
         const res = await fetch(`${GRAPH_BASE}/me?$select=displayName,mail,userPrincipalName`, {
-          headers: { Authorization: `Bearer ${graphToken}`, "Content-Type": "application/json" }
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
         });
         const user = await res.json();
         setUserInfo(user);
