@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mountmeru Room Booking — Teams Setup</title>
+  <title>Mount Meru Room Booking — Teams Setup</title>
   <script src="https://res.cdn.office.net/teams-js/2.22.0/js/MicrosoftTeams.min.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=Lato:wght@400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Open+Sans:wght@400;600;700&display=swap');
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: 'Lato', 'Segoe UI', sans-serif;
-      background: #FAF7F2;
+      font-family: 'Open Sans', 'Segoe UI', sans-serif;
+      background: #F7F7F7;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -27,52 +27,48 @@
       max-width: 440px;
       width: 100%;
       box-shadow: 0 4px 28px rgba(0,0,0,.09);
+      border-top: 4px solid #CC1515;
     }
 
     /* Logo */
     .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
-    .logo-mark {
-      width: 42px; height: 42px; background: #2C2416; border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-family: 'Playfair Display', serif; font-size: 20px; font-weight: 600; color: #C8A96E;
-    }
-    .logo-title { font-family: 'Playfair Display', serif; font-size: 20px; color: #2C2416; }
-    .logo-sub   { font-size: 10px; color: #B09060; letter-spacing: 2.5px; text-transform: uppercase; margin-top: 2px; }
+    .logo-title { font-family: 'Montserrat', sans-serif; font-size: 20px; font-weight: 800; color: #231F20; }
+    .logo-sub   { font-size: 10px; color: #CC1515; letter-spacing: 2.5px; text-transform: uppercase; margin-top: 2px; font-weight: 700; }
 
     /* Headings */
-    h2 { font-size: 16px; font-weight: 700; color: #2C2416; margin-bottom: 6px; }
-    .desc { font-size: 13px; color: #888; line-height: 1.65; margin-bottom: 24px; }
+    h2 { font-size: 16px; font-weight: 700; color: #231F20; margin-bottom: 6px; font-family: 'Montserrat', sans-serif; }
+    .desc { font-size: 13px; color: #777; line-height: 1.65; margin-bottom: 24px; }
 
     /* Option list */
     .options { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
     .option {
       display: flex; align-items: center; gap: 14px;
-      padding: 13px 16px; border-radius: 10px; border: 2px solid #EEE8DF;
+      padding: 13px 16px; border-radius: 10px; border: 2px solid #E8E8E8;
       cursor: pointer; transition: all .15s; user-select: none;
     }
-    .option:hover  { border-color: #C8A96E; background: #FDF9F4; }
-    .option.active { border-color: #C8A96E; background: #FDF3E0; box-shadow: 0 0 0 3px rgba(200,169,110,.15); }
+    .option:hover  { border-color: #CC1515; background: #FFF6F6; }
+    .option.active { border-color: #CC1515; background: #FFF0F0; box-shadow: 0 0 0 3px rgba(204,21,21,.1); }
 
     .opt-dot  { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
     .opt-body { flex: 1; }
-    .opt-name { font-size: 14px; font-weight: 700; color: #2C2416; }
+    .opt-name { font-size: 14px; font-weight: 700; color: #231F20; }
     .opt-desc { font-size: 11px; color: #AAA; margin-top: 2px; }
 
     /* Radio indicator */
     .opt-radio {
-      width: 18px; height: 18px; border-radius: 50%; border: 2px solid #DDD5C4;
+      width: 18px; height: 18px; border-radius: 50%; border: 2px solid #DDDDDD;
       display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: border .15s;
     }
-    .option.active .opt-radio { border-color: #C8A96E; }
+    .option.active .opt-radio { border-color: #CC1515; }
     .opt-radio-dot {
-      width: 8px; height: 8px; border-radius: 50%; background: #C8A96E;
+      width: 8px; height: 8px; border-radius: 50%; background: #CC1515;
       display: none;
     }
     .option.active .opt-radio-dot { display: block; }
 
     .footer-note {
-      text-align: center; font-size: 11px; color: #C0B5A5;
-      padding: 12px 0 0; border-top: 1px solid #EEE8DF;
+      text-align: center; font-size: 11px; color: #BBBBBB;
+      padding: 12px 0 0; border-top: 1px solid #EEEEEE;
     }
     .tip {
       background: #FFF8E1; border-radius: 8px; padding: 10px 14px;
@@ -83,9 +79,13 @@
 <body>
 <div class="card">
   <div class="logo">
-    <div class="logo-mark">M</div>
+    <svg width="44" height="44" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="40" height="40" rx="9" fill="white" stroke="#E8E8E8" stroke-width="1"/>
+      <path d="M4 32V17C4 14 6 12 9 12C11.5 12 13.5 13.5 14.5 15.5C15.5 13.5 17.5 12 20 12C22.5 12 24.5 13.5 25.5 15.5C26.5 13.5 28.5 12 31 12C34 12 36 14 36 17V32H31.5V18.5C31.5 17 30.5 16 29.5 16C28.5 16 27.5 17 27.5 18.5V32H23V18.5C23 17 22 16 21 16C20 16 19 17 19 18.5V32H14.5V18.5C14.5 17 13.5 16 12.5 16C11.5 16 10.5 17 10.5 18.5V32H4Z" fill="#CC1515"/>
+      <ellipse cx="31.5" cy="13" rx="4" ry="5.5" fill="#F7B731" transform="rotate(-8 31.5 13)"/>
+    </svg>
     <div>
-      <div class="logo-title">Mountmeru</div>
+      <div class="logo-title">Mount Meru</div>
       <div class="logo-sub">Room Booking</div>
     </div>
   </div>
@@ -103,7 +103,7 @@
 
   <div class="options" id="options">
     <div class="option active" data-url="https://mountmeru-rooms.vercel.app" data-name="All Rooms">
-      <div class="opt-dot" style="background:#2C2416"></div>
+      <div class="opt-dot" style="background:#231F20"></div>
       <div class="opt-body">
         <div class="opt-name">All Rooms</div>
         <div class="opt-desc">Serengeti (7p) · Tarangire (3p) · Ruaha (2p)</div>
@@ -112,7 +112,7 @@
     </div>
 
     <div class="option" data-url="https://mountmeru-rooms.vercel.app?room=serengeti" data-name="Serengeti">
-      <div class="opt-dot" style="background:#C8A96E"></div>
+      <div class="opt-dot" style="background:#CC1515"></div>
       <div class="opt-body">
         <div class="opt-name">Serengeti</div>
         <div class="opt-desc">Large conference room · 7 person max</div>
@@ -121,7 +121,7 @@
     </div>
 
     <div class="option" data-url="https://mountmeru-rooms.vercel.app?room=tarangire" data-name="Tarangire">
-      <div class="opt-dot" style="background:#6BADA0"></div>
+      <div class="opt-dot" style="background:#5BA89C"></div>
       <div class="opt-body">
         <div class="opt-name">Tarangire</div>
         <div class="opt-desc">Small meeting room · 3 person max</div>
@@ -130,7 +130,7 @@
     </div>
 
     <div class="option" data-url="https://mountmeru-rooms.vercel.app?room=ruaha" data-name="Ruaha">
-      <div class="opt-dot" style="background:#D47E6A"></div>
+      <div class="opt-dot" style="background:#E8963C"></div>
       <div class="opt-body">
         <div class="opt-name">Ruaha</div>
         <div class="opt-desc">Huddle room · 2 person max</div>
