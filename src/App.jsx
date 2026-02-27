@@ -662,7 +662,6 @@ export default function App() {
       {/* ══ HEADER ══ */}
       <header className="header">
         <div className="logo">
-          <MeruLogoMark />
           <div className="logo-text">
             <span className="logo-title">Mount Meru</span>
             <span className="logo-sub">Room Booking</span>
@@ -1127,23 +1126,6 @@ export default function App() {
   );
 }
 
-// ─── Mount Meru Logo Mark ─────────────────────────────────────────────────────
-// Yellow oil drop (left) + bold red lowercase "m" (right) — matches brand logo
-function MeruLogoMark() {
-  return (
-    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect width="40" height="40" rx="9" fill="white"/>
-      {/* Yellow oil drop */}
-      <path d="M8,4 C14,8 15,26 8,34 C1,26 2,8 8,4Z" fill="#F7B731"/>
-      {/* Red bold lowercase "m": three legs + two arched humps */}
-      <path
-        d="M17,34 L17,22 Q22,10 27,22 L27,34 M27,22 Q32,10 37,22 L37,34"
-        fill="none" stroke="#CC1515" strokeWidth="5"
-        strokeLinecap="round" strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 // ─── Microsoft Logo ───────────────────────────────────────────────────────────
 function MsLogo() {
