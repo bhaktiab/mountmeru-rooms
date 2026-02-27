@@ -491,8 +491,17 @@ export default function App() {
       {/* ── Header ── */}
       <div style={{ background:"#D1111C", padding:"16px 32px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
         <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+          {/* MMG Logo on white badge */}
+          <div style={{ background:"#FFFFFF", borderRadius:8, padding:"5px 8px", lineHeight:0, flexShrink:0 }}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 80" width="42" height="34">
+              {/* Red m — two arches */}
+              <path d="M3,72 L3,38 C3,12 50,12 50,38 C50,12 97,12 97,38 L97,72 L85,72 L85,38 C85,24 63,24 63,38 L63,72 L37,72 L37,38 C37,24 15,24 15,38 L15,72 Z" fill="#D1111C"/>
+              {/* Yellow oil drop */}
+              <path d="M22,38 Q9,50 9,59 A13,13 0 0,0 35,59 Q35,50 22,38 Z" fill="#FFCC00"/>
+            </svg>
+          </div>
           <div>
-            <div style={{ fontFamily:'"Avenir","Century Gothic","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:22, fontWeight:700, color:"#FFFFFF", letterSpacing:.5 }}>Mt. Meru</div>
+            <div style={{ fontFamily:'"Avenir","Century Gothic","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:20, fontWeight:700, color:"#FFFFFF", letterSpacing:.3 }}>Mount Meru</div>
             <div style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:10, color:"#FFCC00", letterSpacing:3, textTransform:"uppercase", marginTop:2 }}>Room Booking</div>
           </div>
         </div>
