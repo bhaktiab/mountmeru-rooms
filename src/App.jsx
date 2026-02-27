@@ -54,8 +54,8 @@ async function getToken() {
     const r = await msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: accounts[0] });
     return r.accessToken;
   } catch {
-    const r = await msal.acquireTokenPopup({ scopes: GRAPH_SCOPES, account: accounts[0] });
-    return r.accessToken;
+    await msal.acquireTokenRedirect({ scopes: GRAPH_SCOPES, account: accounts[0] });
+    return null; // page will reload after redirect
   }
 }
 
@@ -141,6 +141,32 @@ export default function App() {
 
   const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 4000); };
 
+  // ── Handle redirect response on page load ──
+  useEffect(() => {
+    (async () => {
+      try {
+        const msal = await getMsal();
+        const result = await msal.handleRedirectPromise();
+        if (result?.account) {
+          const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
+          setUserInfo(user);
+          setAuthState("signed-in");
+          showToast(`Signed in as ${user.displayName}`);
+        } else {
+          const accounts = msal.getAllAccounts();
+          if (accounts.length) {
+            const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
+            setUserInfo(user);
+            setAuthState("signed-in");
+          }
+        }
+      } catch (e) {
+        setAuthState("idle");
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Sync from Outlook ──
   const syncFromOutlook = useCallback(async (date) => {
     setSyncStatus("syncing");
@@ -172,12 +198,8 @@ export default function App() {
     setAuthState("signing-in");
     try {
       const msal = await getMsal();
-      await msal.loginPopup({ scopes: GRAPH_SCOPES });
-      const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
-      setUserInfo(user);
-      setAuthState("signed-in");
-      showToast(`Signed in as ${user.displayName}`);
-      await syncFromOutlook(activeDate);
+      await msal.loginRedirect({ scopes: GRAPH_SCOPES });
+      // page will reload — result handled in useEffect below
     } catch (e) {
       setAuthState("idle");
       showToast("Sign-in failed: " + e.message, "error");
@@ -186,9 +208,8 @@ export default function App() {
 
   const signOut = async () => {
     const msal = await getMsal();
-    await msal.logoutPopup();
+    await msal.logoutRedirect();
     setAuthState("idle"); setUserInfo(null); setSyncStatus("");
-    showToast("Signed out");
   };
 
   // ── Open booking modal ──
