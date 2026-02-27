@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { PublicClientApplication } from "@azure/msal-browser";
 
 // ─── Azure / Microsoft Graph Config ──────────────────────────────────────────
 const MSAL_CONFIG = {
@@ -38,7 +37,15 @@ let _msal = null;
 
 async function getMsal() {
   if (_msal) return _msal;
-  _msal = new PublicClientApplication({
+  if (!window.msal) {
+    await new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = "https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js";
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  _msal = new window.msal.PublicClientApplication({
     auth: { clientId: MSAL_CONFIG.clientId, authority: `https://login.microsoftonline.com/${MSAL_CONFIG.tenantId}`, redirectUri: MSAL_CONFIG.redirectUri },
     cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: false },
   });
