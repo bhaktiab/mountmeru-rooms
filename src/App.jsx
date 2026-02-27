@@ -39,6 +39,18 @@ function initSlots() {
 
 function isValidEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()); }
 
+// Detect if running inside Microsoft Teams iframe
+function isInTeams() {
+  try {
+    return (
+      window.self !== window.top ||
+      navigator.userAgent.includes("Teams") ||
+      window.name === "embedded-page-container" ||
+      window.name === "extension-tab-frame"
+    );
+  } catch { return true; } // cross-origin frame check throws = we're in an iframe
+}
+
 // ─── MSAL helpers ─────────────────────────────────────────────────────────────
 let _msal = null;
 
@@ -60,8 +72,12 @@ async function getToken() {
     const r = await msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: accounts[0] });
     return r.accessToken;
   } catch {
+    if (isInTeams()) {
+      const r = await msal.acquireTokenPopup({ scopes: GRAPH_SCOPES, account: accounts[0] });
+      return r.accessToken;
+    }
     await msal.acquireTokenRedirect({ scopes: GRAPH_SCOPES, account: accounts[0] });
-    return null; // page will reload after redirect
+    return null;
   }
 }
 
@@ -204,8 +220,20 @@ export default function App() {
     setAuthState("signing-in");
     try {
       const msal = await getMsal();
-      await msal.loginRedirect({ scopes: GRAPH_SCOPES });
-      // page will reload — result handled in useEffect below
+      if (isInTeams()) {
+        // Redirect is blocked in iframes (Teams); use popup instead
+        const result = await msal.loginPopup({ scopes: GRAPH_SCOPES });
+        if (result?.account) {
+          const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
+          setUserInfo(user);
+          setAuthState("signed-in");
+          showToast(`Signed in as ${user.displayName}`);
+          await syncFromOutlook(activeDate);
+        }
+      } else {
+        await msal.loginRedirect({ scopes: GRAPH_SCOPES });
+        // page will reload — result handled in useEffect below
+      }
     } catch (e) {
       setAuthState("idle");
       showToast("Sign-in failed: " + e.message, "error");
@@ -214,7 +242,11 @@ export default function App() {
 
   const signOut = async () => {
     const msal = await getMsal();
-    await msal.logoutRedirect();
+    if (isInTeams()) {
+      await msal.logoutPopup();
+    } else {
+      await msal.logoutRedirect();
+    }
     setAuthState("idle"); setUserInfo(null); setSyncStatus("");
   };
 
