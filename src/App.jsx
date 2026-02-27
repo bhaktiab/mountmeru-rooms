@@ -1128,19 +1128,19 @@ export default function App() {
 }
 
 // ─── Mount Meru Logo Mark ─────────────────────────────────────────────────────
-// Three separate arch peaks (mountain motif) + yellow oil-drop on right peak
+// Yellow oil drop (left) + bold red lowercase "m" (right) — matches brand logo
 function MeruLogoMark() {
   return (
     <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
       <rect width="40" height="40" rx="9" fill="white"/>
-      {/* Left arch peak */}
-      <path d="M3,31 L3,19 Q8,8 13,19 L13,31 Z" fill="#CC1515"/>
-      {/* Middle arch peak */}
-      <path d="M15,31 L15,19 Q20,8 25,19 L25,31 Z" fill="#CC1515"/>
-      {/* Right arch peak */}
-      <path d="M27,31 L27,19 Q32,8 37,19 L37,31 Z" fill="#CC1515"/>
-      {/* Yellow oil/flame drop above right peak */}
-      <path d="M32,4 Q37,11 32,17 Q27,11 32,4Z" fill="#F7B731"/>
+      {/* Yellow oil drop */}
+      <path d="M8,4 C14,8 15,26 8,34 C1,26 2,8 8,4Z" fill="#F7B731"/>
+      {/* Red bold lowercase "m": three legs + two arched humps */}
+      <path
+        d="M17,34 L17,22 Q22,10 27,22 L27,34 M27,22 Q32,10 37,22 L37,34"
+        fill="none" stroke="#CC1515" strokeWidth="5"
+        strokeLinecap="round" strokeLinejoin="round"
+      />
     </svg>
   );
 }
