@@ -323,7 +323,13 @@ export default function App() {
       await syncFromOutlook(activeDate);
     } catch (e) {
       if (!isInTeams()) {
-        // Browser redirect — page navigates away, not an error
+        if (e?.message === "NOT_SIGNED_IN") {
+          // No cached session — initiate login redirect
+          const msal = await getMsal();
+          await msal.loginRedirect({ scopes: GRAPH_SCOPES });
+          return;
+        }
+        // Other redirect in progress — page navigates away, not an error
         return;
       }
       setAuthState("idle");
