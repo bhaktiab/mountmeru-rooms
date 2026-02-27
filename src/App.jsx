@@ -12,10 +12,11 @@ const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 const BOOKING_TAG = "MountmeruRoomBooking";
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Mount Meru Brand Colors — Red #D1111C, Yellow #FFCC00, Cyan #00AEEF, Orange #F7941E, Green #6CBE45
 const ROOMS = [
-  { id: "serengeti", name: "Serengeti", capacity: 7, color: "#C8A96E", accent: "#7A5C10", light: "#FDF3E0" },
-  { id: "tarangire", name: "Tarangire", capacity: 3, color: "#6BADA0", accent: "#1E6657", light: "#E6F5F2" },
-  { id: "ruaha",     name: "Ruaha",     capacity: 2, color: "#D47E6A", accent: "#8B3020", light: "#FDEEE9" },
+  { id: "serengeti", name: "Serengeti", capacity: 7, color: "#D1111C", accent: "#8B0000", light: "#FDECEA" },
+  { id: "tarangire", name: "Tarangire", capacity: 3, color: "#00AEEF", accent: "#005B8E", light: "#E6F6FD" },
+  { id: "ruaha",     name: "Ruaha",     capacity: 2, color: "#F7941E", accent: "#B35200", light: "#FFF3E0" },
 ];
 
 const HOURS = Array.from({ length: 26 }, (_, i) => {
@@ -450,63 +451,64 @@ export default function App() {
   const endHourOptions = modal ? HOURS.filter(h => h.value > modal.startHour) : [];
 
   return (
-    <div style={{ fontFamily: "'Georgia',serif", minHeight: "100vh", background: "#FAF7F2", color: "#2C2416" }}>
+    <div style={{ fontFamily: '"Avenir","Century Gothic","Helvetica Neue",Helvetica,Arial,sans-serif', minHeight: "100vh", background: "#F7F7F7", color: "#1A1A1A" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Lato:wght@300;400;600;700&display=swap');
         *{box-sizing:border-box;}
         .slot{cursor:pointer;border-radius:7px;transition:all .14s;min-height:48px;}
-        .slot-free{background:#F0EDE6;border:1.5px dashed #C8BFA8;display:flex;align-items:center;justify-content:center;color:#C0B5A5;font-family:'Lato',sans-serif;font-size:11px;letter-spacing:.8px;}
-        .slot-free:hover{background:#E4DDD5;border-color:#A89068;color:#7A6E60;}
+        .slot-free{background:#F0F0F0;border:1.5px dashed #CCCCCC;display:flex;align-items:center;justify-content:center;color:#AAAAAA;font-family:"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif;font-size:11px;letter-spacing:.8px;}
+        .slot-free:hover{background:#FDECEA;border-color:#D1111C;color:#D1111C;}
         .slot-span{background:repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(0,0,0,.03) 4px,rgba(0,0,0,.03) 8px);border-radius:0;min-height:48px;}
-        .slot-past{background:#F7F6F4;border:1.5px dashed #E0DAD2;opacity:0.45;cursor:default;min-height:48px;}
-        .cancel-btn{background:none;border:none;cursor:pointer;opacity:.4;font-size:13px;padding:3px 5px;border-radius:4px;transition:all .14s;color:#2C2416;}
-        .cancel-btn:hover{opacity:1;background:rgba(192,57,43,.12);color:#C0392B;}
-        .modal-overlay{position:fixed;inset:0;background:rgba(28,18,8,.55);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px);}
-        .modal{background:#FFF9F2;border-radius:16px;padding:32px;width:440px;max-width:95vw;box-shadow:0 28px 80px rgba(0,0,0,.25);animation:popIn .2s ease;max-height:90vh;overflow-y:auto;}
+        .slot-past{background:#F5F5F5;border:1.5px dashed #E0E0E0;opacity:0.45;cursor:default;min-height:48px;}
+        .cancel-btn{background:none;border:none;cursor:pointer;opacity:.4;font-size:13px;padding:3px 5px;border-radius:4px;transition:all .14s;color:#1A1A1A;}
+        .cancel-btn:hover{opacity:1;background:rgba(209,17,28,.12);color:#D1111C;}
+        .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px);}
+        .modal{background:#FFFFFF;border-radius:16px;padding:32px;width:440px;max-width:95vw;box-shadow:0 28px 80px rgba(0,0,0,.18);animation:popIn .2s ease;max-height:90vh;overflow-y:auto;}
         @keyframes popIn{from{opacity:0;transform:scale(.95) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
-        .field-label{font-family:'Lato',sans-serif;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#999;display:block;margin-bottom:5px;}
-        .field-input{width:100%;padding:10px 13px;border:1.5px solid #DDD5C4;border-radius:8px;font-family:'Lato',sans-serif;font-size:13px;background:#FFF;outline:none;transition:border .15s,box-shadow .15s;color:#2C2416;}
-        .field-input:focus{border-color:#C8A96E;box-shadow:0 0 0 3px rgba(200,169,110,.15);}
-        .btn{padding:10px 20px;border-radius:8px;font-family:'Lato',sans-serif;font-weight:700;font-size:13px;cursor:pointer;letter-spacing:.5px;transition:all .14s;border:none;}
-        .btn-primary{background:#2C2416;color:#FAF7F2;}
-        .btn-primary:hover:not(:disabled){background:#4A3D28;}
+        .field-label{font-family:"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#888;display:block;margin-bottom:5px;}
+        .field-input{width:100%;padding:10px 13px;border:1.5px solid #E0E0E0;border-radius:8px;font-family:"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif;font-size:13px;background:#FFF;outline:none;transition:border .15s,box-shadow .15s;color:#1A1A1A;}
+        .field-input:focus{border-color:#D1111C;box-shadow:0 0 0 3px rgba(209,17,28,.12);}
+        .btn{padding:10px 20px;border-radius:8px;font-family:"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif;font-weight:700;font-size:13px;cursor:pointer;letter-spacing:.5px;transition:all .14s;border:none;}
+        .btn-primary{background:#D1111C;color:#FFFFFF;}
+        .btn-primary:hover:not(:disabled){background:#A80E17;}
         .btn-primary:disabled{opacity:.5;cursor:not-allowed;}
-        .btn-ghost{background:transparent;color:#888;border:1.5px solid #D4C8B0;}
-        .btn-ghost:hover{border-color:#999;color:#2C2416;}
-        .email-tag{display:inline-flex;align-items:center;gap:5px;background:#EEE8DF;border-radius:20px;padding:3px 10px;font-family:'Lato',sans-serif;font-size:12px;color:#5A4A30;margin:3px;}
+        .btn-ghost{background:transparent;color:#888;border:1.5px solid #DDDDDD;}
+        .btn-ghost:hover{border-color:#D1111C;color:#D1111C;}
+        .email-tag{display:inline-flex;align-items:center;gap:5px;background:#FFF0F0;border-radius:20px;padding:3px 10px;font-family:"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif;font-size:12px;color:#8B0000;margin:3px;}
         .email-tag button{background:none;border:none;cursor:pointer;color:#999;font-size:13px;padding:0;line-height:1;}
-        .email-tag button:hover{color:#C0392B;}
-        .toast{position:fixed;bottom:26px;right:26px;padding:13px 18px;border-radius:10px;font-family:'Lato',sans-serif;font-size:13px;font-weight:600;z-index:200;animation:slideUp .25s ease;max-width:320px;line-height:1.5;}
+        .email-tag button:hover{color:#D1111C;}
+        .toast{position:fixed;bottom:26px;right:26px;padding:13px 18px;border-radius:10px;font-family:"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif;font-size:13px;font-weight:600;z-index:200;animation:slideUp .25s ease;max-width:320px;line-height:1.5;}
         @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-        .toast-success{background:#2C2416;color:#FAF7F2;}
-        .toast-error{background:#B03A2E;color:#fff;}
+        .toast-success{background:#D1111C;color:#FFFFFF;}
+        .toast-error{background:#8B0000;color:#fff;}
         .spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px;}
         @keyframes spin{to{transform:rotate(360deg)}}
         input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);}
         ::-webkit-scrollbar{width:5px;height:5px;}
-        ::-webkit-scrollbar-thumb{background:#D4C8B0;border-radius:3px;}
-        .row-alt{background:rgba(0,0,0,.018);}
+        ::-webkit-scrollbar-thumb{background:#CCCCCC;border-radius:3px;}
+        .row-alt{background:rgba(0,0,0,.022);}
       `}</style>
 
       {/* ── Header ── */}
-      <div style={{ background:"#2C2416", padding:"20px 32px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
-        <div>
-          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:24, color:"#FAF7F2" }}>Mountmeru</div>
-          <div style={{ fontFamily:"'Lato',sans-serif", fontSize:10, color:"#C8A96E", letterSpacing:3, textTransform:"uppercase", marginTop:2 }}>Room Booking</div>
+      <div style={{ background:"#D1111C", padding:"16px 32px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+          <div>
+            <div style={{ fontFamily:'"Avenir","Century Gothic","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:22, fontWeight:700, color:"#FFFFFF", letterSpacing:.5 }}>Mt. Meru</div>
+            <div style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:10, color:"#FFCC00", letterSpacing:3, textTransform:"uppercase", marginTop:2 }}>Room Booking</div>
+          </div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
           {authState === "signed-in" ? (
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-              <span style={{ fontFamily:"'Lato',sans-serif", fontSize:12, color: syncStatus==="synced"?"#6BCB8B": syncStatus==="syncing"?"#C8A96E":"#888" }}>
+              <span style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:12, color: syncStatus==="synced"?"#FFCC00": syncStatus==="syncing"?"rgba(255,255,255,.7)":"rgba(255,255,255,.5)" }}>
                 {syncStatus==="syncing"?"⟳ Syncing…": syncStatus==="synced"?"✓ Synced": syncStatus==="error"?"⚠ Sync error":""}
               </span>
-              <span style={{ fontFamily:"'Lato',sans-serif", fontSize:12, color:"#FAF7F2" }}>{userInfo?.displayName}</span>
-              <button className="btn btn-ghost" style={{ padding:"6px 13px", fontSize:11, border:"1px solid #6A5A44", color:"#C8A96E" }} onClick={signOut}>Sign out</button>
-              <button className="btn" style={{ padding:"6px 13px", fontSize:11, background:"#4A3D28", color:"#C8A96E" }} onClick={() => syncFromOutlook(activeDate)}>↻ Sync</button>
+              <span style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:12, color:"#FFFFFF" }}>{userInfo?.displayName}</span>
+              <button className="btn btn-ghost" style={{ padding:"6px 13px", fontSize:11, border:"1px solid rgba(255,255,255,.4)", color:"#FFCC00", background:"transparent" }} onClick={signOut}>Sign out</button>
+              <button className="btn" style={{ padding:"6px 13px", fontSize:11, background:"#A80E17", color:"#FFCC00", border:"none" }} onClick={() => syncFromOutlook(activeDate)}>↻ Sync</button>
             </div>
           ) : (
             <button onClick={signIn} disabled={authState==="signing-in"}
-              style={{ background:"#0078D4", color:"#fff", border:"none", padding:"9px 16px", borderRadius:8, fontFamily:"'Lato',sans-serif", fontWeight:700, fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", gap:8, opacity:authState==="signing-in"?.7:1 }}>
+              style={{ background:"rgba(255,255,255,.15)", color:"#fff", border:"1.5px solid rgba(255,255,255,.5)", padding:"9px 16px", borderRadius:8, fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontWeight:700, fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", gap:8, opacity:authState==="signing-in"?.7:1 }}>
               {authState==="signing-in"
                 ? <><span className="spinner"/>Signing in…</>
                 : <><svg width="14" height="14" viewBox="0 0 21 21" fill="none"><rect width="10" height="10" fill="#F25022"/><rect x="11" width="10" height="10" fill="#7FBA00"/><rect y="11" width="10" height="10" fill="#00A4EF"/><rect x="11" y="11" width="10" height="10" fill="#FFB900"/></svg>Connect Outlook</>}
@@ -514,25 +516,25 @@ export default function App() {
           )}
           <input type="date" value={activeDate}
             onChange={e => { const d=e.target.value; setActiveDate(d); if(!dateBookings[d]) setDateBookings(p=>({...p,[d]:initSlots()})); }}
-            style={{ background:"#3D3020", border:"none", color:"#FAF7F2", padding:"10px 14px", borderRadius:8, fontSize:13, cursor:"pointer", fontFamily:"'Lato',sans-serif" }}
+            style={{ background:"#A80E17", border:"none", color:"#FFFFFF", padding:"10px 14px", borderRadius:8, fontSize:13, cursor:"pointer", fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif' }}
           />
         </div>
       </div>
 
       <div style={{ padding:"24px 32px" }}>
-        <div style={{ fontFamily:"'Playfair Display',serif", fontSize:16, color:"#9A7A4A", marginBottom:20 }}>{formatDate(activeDate)}</div>
+        <div style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:15, fontWeight:600, color:"#D1111C", marginBottom:20 }}>{formatDate(activeDate)}</div>
 
         {/* Room summary cards */}
         <div style={{ display:"flex", gap:12, marginBottom:24, flexWrap:"wrap" }}>
           {ROOMS.map(room => {
             const booked = Object.values(currentBookings[room.id]||{}).filter(b=>b&&!b.isSpan).length;
             return (
-              <div key={room.id} style={{ background:room.light, borderRadius:12, padding:"14px 20px", flex:"1 1 140px", borderLeft:`5px solid ${room.color}`, boxShadow:"0 2px 8px rgba(0,0,0,.05)" }}>
-                <div style={{ fontFamily:"'Playfair Display',serif", fontSize:16 }}>{room.name}</div>
-                <div style={{ fontFamily:"'Lato',sans-serif", fontSize:11, color:"#AAA", letterSpacing:1.2, textTransform:"uppercase", marginTop:2 }}>{room.capacity} pax max</div>
+              <div key={room.id} style={{ background:room.light, borderRadius:12, padding:"14px 20px", flex:"1 1 140px", borderLeft:`5px solid ${room.color}`, boxShadow:"0 2px 8px rgba(0,0,0,.06)" }}>
+                <div style={{ fontFamily:'"Avenir","Century Gothic","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:16, fontWeight:700, color:"#1A1A1A" }}>{room.name}</div>
+                <div style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:11, color:"#999", letterSpacing:1.2, textTransform:"uppercase", marginTop:2 }}>{room.capacity} pax max</div>
                 <div style={{ marginTop:8, display:"flex", gap:6 }}>
-                  <span style={{ background:room.color+"28", color:room.accent, padding:"2px 9px", borderRadius:20, fontSize:10, fontFamily:"'Lato',sans-serif", fontWeight:700, letterSpacing:.5, textTransform:"uppercase" }}>{booked} booked</span>
-                  <span style={{ background:"#EEE8DF", color:"#AAA", padding:"2px 9px", borderRadius:20, fontSize:10, fontFamily:"'Lato',sans-serif", fontWeight:700, letterSpacing:.5, textTransform:"uppercase" }}>{HOURS.length-booked} free</span>
+                  <span style={{ background:room.color+"22", color:room.accent, padding:"2px 9px", borderRadius:20, fontSize:10, fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontWeight:700, letterSpacing:.5, textTransform:"uppercase" }}>{booked} booked</span>
+                  <span style={{ background:"#EEEEEE", color:"#999", padding:"2px 9px", borderRadius:20, fontSize:10, fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontWeight:700, letterSpacing:.5, textTransform:"uppercase" }}>{HOURS.length-booked} free</span>
                 </div>
               </div>
             );
@@ -544,24 +546,24 @@ export default function App() {
           <div style={{ minWidth:540 }}>
             <div style={{ display:"flex", paddingLeft:64, marginBottom:6 }}>
               {ROOMS.map(r => (
-                <div key={r.id} style={{ flex:1, fontFamily:"'Playfair Display',serif", fontSize:14, color:"#2C2416", padding:"0 5px 7px", borderBottom:`3px solid ${r.color}` }}>{r.name}</div>
+                <div key={r.id} style={{ flex:1, fontFamily:'"Avenir","Century Gothic","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:14, fontWeight:700, color:"#1A1A1A", padding:"0 5px 7px", borderBottom:`3px solid ${r.color}` }}>{r.name}</div>
               ))}
             </div>
             {HOURS.map(({ value, label }, idx) => (
               <div key={value} className={idx%2===1?"row-alt":""} style={{ display:"flex", alignItems:"stretch", marginBottom:3, borderRadius:6 }}>
-                <div style={{ width:64, minWidth:64, fontFamily:"'Lato',sans-serif", fontSize:11, color:"#B09060", textAlign:"right", paddingRight:10, display:"flex", alignItems:"center", justifyContent:"flex-end" }}>{label}</div>
+                <div style={{ width:64, minWidth:64, fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:11, color:"#D1111C", textAlign:"right", paddingRight:10, display:"flex", alignItems:"center", justifyContent:"flex-end" }}>{label}</div>
                 {ROOMS.map(room => {
                   const booking = currentBookings[room.id]?.[value];
                   if (booking?.isSpan) {
-                    return <div key={room.id} style={{ flex:1, padding:"3px 5px" }}><div className="slot slot-span" style={{ border:`1px solid ${room.color}40`, background:room.color+"15" }} /></div>;
+                    return <div key={room.id} style={{ flex:1, padding:"3px 5px" }}><div className="slot slot-span" style={{ border:`1px solid ${room.color}40`, background:room.color+"18" }} /></div>;
                   }
                   return (
                     <div key={room.id} style={{ flex:1, padding:"3px 5px" }}>
                       {booking ? (
-                        <div className="slot" style={{ background:room.color+"28", border:`1.5px solid ${room.color}70`, padding:"8px 11px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                        <div className="slot" style={{ background:room.color+"22", border:`1.5px solid ${room.color}80`, padding:"8px 11px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                           <div>
-                            <div style={{ fontFamily:"'Lato',sans-serif", fontWeight:700, fontSize:12, color:room.accent }}>{booking.name}</div>
-                            <div style={{ fontFamily:"'Lato',sans-serif", fontSize:10, color:"#AAA", marginTop:1 }}>
+                            <div style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontWeight:700, fontSize:12, color:room.accent }}>{booking.name}</div>
+                            <div style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:10, color:"#999", marginTop:1 }}>
                               until {HOURS.find(h=>h.value===booking.endHour)?.label || booking.endHour}
                               {booking.outlookEventId && <span style={{ color:"#0078D4", marginLeft:5 }}>📅</span>}
                               {booking.emails?.length>0 && <span style={{ marginLeft:5 }}>👥 {booking.emails.length}</span>}
@@ -590,10 +592,10 @@ export default function App() {
             <div className="modal" onClick={e=>e.stopPropagation()}>
               {/* Title */}
               <div style={{ display:"flex", alignItems:"center", gap:9, marginBottom:4 }}>
-                <div style={{ width:10, height:10, borderRadius:"50%", background:room.color, flexShrink:0 }}/>
-                <div style={{ fontFamily:"'Playfair Display',serif", fontSize:20 }}>Book {room.name}</div>
+                <div style={{ width:12, height:12, borderRadius:"50%", background:room.color, flexShrink:0 }}/>
+                <div style={{ fontFamily:'"Avenir","Century Gothic","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:20, fontWeight:700, color:"#1A1A1A" }}>Book {room.name}</div>
               </div>
-              <div style={{ fontFamily:"'Lato',sans-serif", fontSize:12, color:"#BBB", marginBottom:22 }}>
+              <div style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:12, color:"#AAA", marginBottom:22 }}>
                 {HOURS.find(h=>h.value===modal.startHour)?.label} · {activeDate} · max {room.capacity} pax
               </div>
 
@@ -662,18 +664,18 @@ export default function App() {
                           onMouseDown={()=>selectSuggestion(p)}
                           onKeyDown={e=>{ if(e.key==="Enter") selectSuggestion(p); }}
                           style={{ padding:"9px 14px", cursor:"pointer", display:"flex", alignItems:"center", gap:10,
-                            background: i%2===0 ? "white" : "#FDFBF8",
+                            background: i%2===0 ? "white" : "#FAFAFA",
                             borderBottom: i < peopleSuggestions.length-1 ? "1px solid #F0EDE6" : "none" }}
-                          onMouseEnter={e=>e.currentTarget.style.background="#FDF3E0"}
-                          onMouseLeave={e=>e.currentTarget.style.background=i%2===0?"white":"#FDFBF8"}>
-                          <div style={{ width:28, height:28, borderRadius:"50%", background:"#EEE8DF",
+                          onMouseEnter={e=>e.currentTarget.style.background="#FDECEA"}
+                          onMouseLeave={e=>e.currentTarget.style.background=i%2===0?"white":"#FAFAFA"}>
+                          <div style={{ width:28, height:28, borderRadius:"50%", background:"#FDECEA",
                             display:"flex", alignItems:"center", justifyContent:"center",
-                            fontFamily:"'Lato',sans-serif", fontWeight:700, fontSize:11, color:"#B09060", flexShrink:0 }}>
+                            fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontWeight:700, fontSize:11, color:"#D1111C", flexShrink:0 }}>
                             {p.name.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <div style={{ fontFamily:"'Lato',sans-serif", fontSize:13, fontWeight:600, color:"#2C2416" }}>{p.name}</div>
-                            <div style={{ fontFamily:"'Lato',sans-serif", fontSize:11, color:"#AAA" }}>{p.email}</div>
+                            <div style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:13, fontWeight:600, color:"#1A1A1A" }}>{p.name}</div>
+                            <div style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:11, color:"#AAA" }}>{p.email}</div>
                           </div>
                         </div>
                       ))}
@@ -689,17 +691,17 @@ export default function App() {
                     ))}
                   </div>
                 )}
-                <div style={{ fontFamily:"'Lato',sans-serif", fontSize:11, color:"#BBB", marginTop:6 }}>Type a name to search, or enter an email directly</div>
+                <div style={{ fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:11, color:"#BBB", marginTop:6 }}>Type a name to search, or enter an email directly</div>
               </div>
 
               {/* Outlook notice */}
               {authState==="signed-in" ? (
-                <div style={{ background:"#EBF5FB", borderRadius:8, padding:"9px 14px", marginBottom:20, fontFamily:"'Lato',sans-serif", fontSize:12, color:"#0078D4", display:"flex", alignItems:"center", gap:7 }}>
+                <div style={{ background:"#EBF5FB", borderRadius:8, padding:"9px 14px", marginBottom:20, fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:12, color:"#0078D4", display:"flex", alignItems:"center", gap:7 }}>
                   <svg width="13" height="13" viewBox="0 0 21 21" fill="none"><rect width="10" height="10" fill="#F25022"/><rect x="11" width="10" height="10" fill="#7FBA00"/><rect y="11" width="10" height="10" fill="#00A4EF"/><rect x="11" y="11" width="10" height="10" fill="#FFB900"/></svg>
                   Outlook calendar invite will be sent to all attendees
                 </div>
               ) : (
-                <div style={{ background:"#FFF8E6", borderRadius:8, padding:"9px 14px", marginBottom:20, fontFamily:"'Lato',sans-serif", fontSize:12, color:"#9A6F00" }}>
+                <div style={{ background:"#FFF8E6", borderRadius:8, padding:"9px 14px", marginBottom:20, fontFamily:'"Avenir","Helvetica Neue",Helvetica,Arial,sans-serif', fontSize:12, color:"#9A6F00" }}>
                   ⚠ Connect Outlook (top right) to send calendar invites
                 </div>
               )}
