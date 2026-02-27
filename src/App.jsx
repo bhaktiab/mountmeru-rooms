@@ -143,6 +143,22 @@ async function gFetch(path, opts = {}) {
   return res.json();
 }
 
+// Search org directory for people matching query
+async function searchPeople(query) {
+  if (!query || query.length < 2) return [];
+  try {
+    const data = await gFetch(
+      `/people?$search="${encodeURIComponent(query)}"&$select=displayName,scoredEmailAddresses&$top=8`
+    );
+    return (data?.value || [])
+      .map(p => ({
+        name: p.displayName,
+        email: p.scoredEmailAddresses?.[0]?.address || "",
+      }))
+      .filter(p => p.email && p.email.includes("@"));
+  } catch { return []; }
+}
+
 // Build timezone-aware ISO from local date + HH:MM
 function toLocalISO(date, hhmm) {
   return `${date}T${hhmm}:00`;
@@ -206,6 +222,9 @@ export default function App() {
   const [userInfo, setUserInfo]         = useState(null);
   const [syncStatus, setSyncStatus]     = useState(""); // "" | syncing | synced | error
   const [isLoading, setIsLoading]       = useState(false);
+  const [peopleSuggestions, setPeopleSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions]     = useState(false);
+  const _searchTimeout = { current: null };
 
   const currentBookings = dateBookings[activeDate] || initSlots();
 
@@ -315,12 +334,32 @@ export default function App() {
   };
 
   // ── Add email tag ──
-  const addEmail = () => {
-    const e = form.emailInput.trim();
+  const addEmail = (emailOverride) => {
+    const e = (emailOverride || form.emailInput).trim();
     if (!e) return;
     if (!isValidEmail(e)) { showToast("Invalid email address", "error"); return; }
     if (form.emails.includes(e)) { showToast("Already added", "error"); return; }
     setForm(f => ({ ...f, emails: [...f.emails, e], emailInput: "" }));
+    setPeopleSuggestions([]);
+    setShowSuggestions(false);
+  };
+
+  const selectSuggestion = (person) => {
+    if (form.emails.includes(person.email)) { showToast("Already added", "error"); return; }
+    setForm(f => ({ ...f, emails: [...f.emails, person.email], emailInput: "" }));
+    setPeopleSuggestions([]);
+    setShowSuggestions(false);
+  };
+
+  const handleAttendeeInput = (val) => {
+    setForm(f => ({ ...f, emailInput: val }));
+    clearTimeout(_searchTimeout.current);
+    if (val.length < 2 || !authState === "signed-in") { setPeopleSuggestions([]); setShowSuggestions(false); return; }
+    _searchTimeout.current = setTimeout(async () => {
+      const results = await searchPeople(val);
+      setPeopleSuggestions(results);
+      setShowSuggestions(results.length > 0);
+    }, 300);
   };
 
   const removeEmail = (e) => setForm(f => ({ ...f, emails: f.emails.filter(x => x !== e) }));
@@ -581,12 +620,49 @@ export default function App() {
               {/* Invite attendees */}
               <div style={{ marginBottom:18 }}>
                 <label className="field-label">Invite Attendees (optional)</label>
-                <div style={{ display:"flex", gap:8 }}>
-                  <input className="field-input" type="email" placeholder="colleague@company.com" value={form.emailInput}
-                    onChange={e=>setForm(f=>({...f,emailInput:e.target.value}))}
-                    onKeyDown={e=>{ if(e.key==="Enter"||e.key===","){ e.preventDefault(); addEmail(); } }}
-                    style={{ flex:1 }} />
-                  <button className="btn btn-ghost" style={{ padding:"10px 14px", whiteSpace:"nowrap" }} onClick={addEmail}>+ Add</button>
+                <div style={{ position:"relative" }}>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <input className="field-input" type="text" placeholder="Type a name or email…" value={form.emailInput}
+                      onChange={e=>handleAttendeeInput(e.target.value)}
+                      onKeyDown={e=>{
+                        if (e.key==="Enter"||e.key===",") { e.preventDefault(); addEmail(); }
+                        if (e.key==="Escape") { setShowSuggestions(false); }
+                        if (e.key==="ArrowDown" && showSuggestions && peopleSuggestions.length > 0) {
+                          e.preventDefault();
+                          document.querySelector(".people-suggestion")?.focus();
+                        }
+                      }}
+                      onBlur={()=>setTimeout(()=>setShowSuggestions(false), 150)}
+                      onFocus={()=>peopleSuggestions.length>0 && setShowSuggestions(true)}
+                      style={{ flex:1 }} />
+                    <button className="btn btn-ghost" style={{ padding:"10px 14px", whiteSpace:"nowrap" }} onClick={()=>addEmail()}>+ Add</button>
+                  </div>
+                  {showSuggestions && peopleSuggestions.length > 0 && (
+                    <div style={{ position:"absolute", top:"100%", left:0, right:48, background:"white",
+                      border:"1.5px solid #E8E0D4", borderRadius:8, boxShadow:"0 4px 16px rgba(0,0,0,.10)",
+                      zIndex:100, overflow:"hidden", marginTop:3 }}>
+                      {peopleSuggestions.map((p, i) => (
+                        <div key={p.email} className="people-suggestion" tabIndex={0}
+                          onMouseDown={()=>selectSuggestion(p)}
+                          onKeyDown={e=>{ if(e.key==="Enter") selectSuggestion(p); }}
+                          style={{ padding:"9px 14px", cursor:"pointer", display:"flex", alignItems:"center", gap:10,
+                            background: i%2===0 ? "white" : "#FDFBF8",
+                            borderBottom: i < peopleSuggestions.length-1 ? "1px solid #F0EDE6" : "none" }}
+                          onMouseEnter={e=>e.currentTarget.style.background="#FDF3E0"}
+                          onMouseLeave={e=>e.currentTarget.style.background=i%2===0?"white":"#FDFBF8"}>
+                          <div style={{ width:28, height:28, borderRadius:"50%", background:"#EEE8DF",
+                            display:"flex", alignItems:"center", justifyContent:"center",
+                            fontFamily:"'Lato',sans-serif", fontWeight:700, fontSize:11, color:"#B09060", flexShrink:0 }}>
+                            {p.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div style={{ fontFamily:"'Lato',sans-serif", fontSize:13, fontWeight:600, color:"#2C2416" }}>{p.name}</div>
+                            <div style={{ fontFamily:"'Lato',sans-serif", fontSize:11, color:"#AAA" }}>{p.email}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 {form.emails.length>0 && (
                   <div style={{ marginTop:8, display:"flex", flexWrap:"wrap" }}>
@@ -597,7 +673,7 @@ export default function App() {
                     ))}
                   </div>
                 )}
-                <div style={{ fontFamily:"'Lato',sans-serif", fontSize:11, color:"#BBB", marginTop:6 }}>Press Enter or comma to add each email</div>
+                <div style={{ fontFamily:"'Lato',sans-serif", fontSize:11, color:"#BBB", marginTop:6 }}>Type a name to search, or enter an email directly</div>
               </div>
 
               {/* Outlook notice */}
