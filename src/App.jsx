@@ -18,9 +18,15 @@ const ROOMS = [
   { id: "ruaha",     name: "Ruaha",     capacity: 2, color: "#D47E6A", accent: "#8B3020", light: "#FDEEE9" },
 ];
 
-const HOURS = Array.from({ length: 13 }, (_, i) => {
-  const h = i + 8;
-  return { value: `${h.toString().padStart(2,"0")}:00`, label: h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h-12} PM` };
+const HOURS = Array.from({ length: 26 }, (_, i) => {
+  const totalMins = (8 * 60) + (i * 30);
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  const value = `${h.toString().padStart(2,"0")}:${m.toString().padStart(2,"0")}`;
+  const label = m === 0
+    ? (h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h-12} PM`)
+    : (h < 12 ? `${h}:30 AM` : h === 12 ? "12:30 PM" : `${h-12}:30 PM`);
+  return { value, label };
 });
 
 const today = new Date().toISOString().split("T")[0];
@@ -147,16 +153,26 @@ async function gFetch(path, opts = {}) {
 async function searchPeople(query) {
   if (!query || query.length < 2) return [];
   try {
+    // Use /users with $filter for reliable org-wide search
+    const q = encodeURIComponent(query);
     const data = await gFetch(
-      `/people?$search="${encodeURIComponent(query)}"&$select=displayName,scoredEmailAddresses&$top=8`
+      `/users?$filter=startswith(displayName,'${q}') or startswith(mail,'${q}') or startswith(givenName,'${q}') or startswith(surname,'${q}')&$select=displayName,mail,userPrincipalName&$top=8`
     );
     return (data?.value || [])
       .map(p => ({
-        name: p.displayName,
-        email: p.scoredEmailAddresses?.[0]?.address || "",
+        name: p.displayName || "",
+        email: p.mail || p.userPrincipalName || "",
       }))
       .filter(p => p.email && p.email.includes("@"));
-  } catch { return []; }
+  } catch {
+    // Fallback: try /me/people (personal contacts + org)
+    try {
+      const data = await gFetch(`/me/people?$search="${encodeURIComponent(query)}"&$select=displayName,scoredEmailAddresses&$top=8`);
+      return (data?.value || [])
+        .map(p => ({ name: p.displayName || "", email: p.scoredEmailAddresses?.[0]?.address || "" }))
+        .filter(p => p.email && p.email.includes("@"));
+    } catch { return []; }
+  }
 }
 
 // Build timezone-aware ISO from local date + HH:MM
@@ -354,7 +370,7 @@ export default function App() {
   const handleAttendeeInput = (val) => {
     setForm(f => ({ ...f, emailInput: val }));
     clearTimeout(_searchTimeout.current);
-    if (val.length < 2 || !authState === "signed-in") { setPeopleSuggestions([]); setShowSuggestions(false); return; }
+    if (val.length < 2 || authState !== "signed-in") { setPeopleSuggestions([]); setShowSuggestions(false); return; }
     _searchTimeout.current = setTimeout(async () => {
       const results = await searchPeople(val);
       setPeopleSuggestions(results);
