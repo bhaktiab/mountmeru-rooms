@@ -25,6 +25,12 @@ const HOURS = Array.from({ length: 13 }, (_, i) => {
 
 const today = new Date().toISOString().split("T")[0];
 
+function isPastSlot(date, hourValue) {
+  const now = new Date();
+  const slotTime = new Date(`${date}T${hourValue}:00`);
+  return slotTime < now;
+}
+
 function initSlots() {
   const s = {};
   ROOMS.forEach(r => { s[r.id] = {}; HOURS.forEach(h => { s[r.id][h.value] = null; }); });
@@ -215,6 +221,7 @@ export default function App() {
   // ── Open booking modal ──
   const openModal = (roomId, startHour) => {
     if (currentBookings[roomId]?.[startHour]) return;
+    if (isPastSlot(activeDate, startHour)) { showToast("Cannot book a time slot in the past", "error"); return; }
     const hIdx = HOURS.findIndex(h => h.value === startHour);
     const defaultEnd = HOURS[Math.min(hIdx + 1, HOURS.length - 1)].value;
     setForm({ name: userInfo?.displayName || "", email: userInfo?.mail || userInfo?.userPrincipalName || "", title: "", endHour: defaultEnd, emailInput: "", emails: [] });
@@ -310,6 +317,7 @@ export default function App() {
         .slot-free{background:#F0EDE6;border:1.5px dashed #C8BFA8;display:flex;align-items:center;justify-content:center;color:#C0B5A5;font-family:'Lato',sans-serif;font-size:11px;letter-spacing:.8px;}
         .slot-free:hover{background:#E4DDD5;border-color:#A89068;color:#7A6E60;}
         .slot-span{background:repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(0,0,0,.03) 4px,rgba(0,0,0,.03) 8px);border-radius:0;min-height:48px;}
+        .slot-past{background:#F7F6F4;border:1.5px dashed #E0DAD2;opacity:0.45;cursor:default;min-height:48px;}
         .cancel-btn{background:none;border:none;cursor:pointer;opacity:.4;font-size:13px;padding:3px 5px;border-radius:4px;transition:all .14s;color:#2C2416;}
         .cancel-btn:hover{opacity:1;background:rgba(192,57,43,.12);color:#C0392B;}
         .modal-overlay{position:fixed;inset:0;background:rgba(28,18,8,.55);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px);}
@@ -420,9 +428,10 @@ export default function App() {
                           </div>
                           <button className="cancel-btn" onClick={()=>handleCancel(room.id,value)} title="Cancel">✕</button>
                         </div>
-                      ) : (
-                        <div className="slot slot-free" onClick={()=>openModal(room.id,value)}>+ Book</div>
-                      )}
+                      ) : (() => {
+                          const past = isPastSlot(activeDate, value);
+                          return <div className={"slot " + (past ? "slot-past" : "slot-free")} onClick={()=>!past && openModal(room.id,value)} style={past ? {cursor:"default"} : {}}>{past ? "" : "+ Book"}</div>;
+                        })()}
                     </div>
                   );
                 })}
