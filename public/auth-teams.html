@@ -13,7 +13,7 @@
                border-top-color: #C8A96E; border-radius: 50%;
                animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .error { color: #c0392b; font-size: 13px; margin-top: 12px; max-width: 320px; }
+    .error { color: #c0392b; font-size: 12px; margin-top: 12px; max-width: 340px; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -26,63 +26,111 @@
   const CLIENT_ID = "0c2d3aa6-1e8d-4c4a-a290-9a8590b5597b";
   const TENANT_ID = "24067079-ff6a-4c4e-a5de-7c5ac7ddf4d8";
   const REDIRECT  = "https://mountmeru-rooms.vercel.app/auth-teams.html";
-  const SCOPES    = "Calendars.ReadWrite User.Read openid profile";
+  // Use code flow (PKCE) instead of implicit — more reliable and doesn't need Azure config change
+  const SCOPES    = "Calendars.ReadWrite User.Read openid profile offline_access";
 
-  function parseHash(hash) {
+  function show(msg) { document.getElementById("status").textContent = msg; }
+  function showErr(msg) {
+    document.getElementById("spinner").style.display = "none";
+    document.getElementById("status").textContent = "Sign-in failed";
+    document.getElementById("error").textContent = msg;
+  }
+
+  function parseFragment(hash) {
     const params = {};
-    hash.replace(/^#/, "").split("&").forEach(p => {
-      const [k, v] = p.split("=");
-      params[decodeURIComponent(k)] = decodeURIComponent(v || "");
+    hash.replace(/^[#?]/, "").split("&").forEach(p => {
+      const i = p.indexOf("=");
+      if (i > 0) params[decodeURIComponent(p.slice(0, i))] = decodeURIComponent(p.slice(i + 1));
     });
     return params;
   }
 
-  function generateNonce() {
-    const arr = new Uint8Array(16);
+  function generateVerifier() {
+    const arr = new Uint8Array(32);
     crypto.getRandomValues(arr);
-    return Array.from(arr, b => b.toString(16).padStart(2, "0")).join("");
+    return btoa(String.fromCharCode(...arr)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  }
+
+  async function sha256(plain) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(plain);
+    const hash = await crypto.subtle.digest("SHA-256", data);
+    return btoa(String.fromCharCode(...new Uint8Array(hash))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
   }
 
   (async () => {
-    await microsoftTeams.app.initialize();
+    try {
+      await microsoftTeams.app.initialize();
 
-    // ── Step 2: Returning from Microsoft with token in hash ──
-    if (window.location.hash && window.location.hash.includes("access_token")) {
-      const params = parseHash(window.location.hash);
-      if (params.access_token) {
-        microsoftTeams.authentication.notifySuccess(params.access_token);
+      // ── Returning from Microsoft with auth code ──
+      const urlParams = parseFragment(window.location.search);
+      const hashParams = parseFragment(window.location.hash);
+
+      // Check for errors first
+      const error = urlParams.error || hashParams.error;
+      if (error) {
+        microsoftTeams.authentication.notifyFailure(
+          urlParams.error_description || hashParams.error_description || error
+        );
         return;
       }
-      if (params.error) {
-        microsoftTeams.authentication.notifyFailure(params.error_description || params.error);
+
+      // Got an auth code — exchange it for a token
+      const code = urlParams.code || hashParams.code;
+      if (code) {
+        show("Exchanging code for token…");
+        const verifier = sessionStorage.getItem("pkce_verifier");
+        if (!verifier) {
+          microsoftTeams.authentication.notifyFailure("PKCE verifier missing — please try again");
+          return;
+        }
+
+        const body = new URLSearchParams({
+          client_id: CLIENT_ID,
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          code_verifier: verifier,
+          scope: SCOPES,
+        });
+
+        const resp = await fetch(
+          `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
+          { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body }
+        );
+        const data = await resp.json();
+
+        if (data.access_token) {
+          sessionStorage.removeItem("pkce_verifier");
+          microsoftTeams.authentication.notifySuccess(data.access_token);
+        } else {
+          microsoftTeams.authentication.notifyFailure(data.error_description || data.error || "Token exchange failed");
+        }
         return;
       }
+
+      // ── First load — build PKCE and redirect to Microsoft ──
+      show("Redirecting to Microsoft…");
+      const verifier  = generateVerifier();
+      const challenge = await sha256(verifier);
+      sessionStorage.setItem("pkce_verifier", verifier);
+
+      const authUrl = new URL(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize`);
+      authUrl.searchParams.set("client_id", CLIENT_ID);
+      authUrl.searchParams.set("response_type", "code");
+      authUrl.searchParams.set("redirect_uri", REDIRECT);
+      authUrl.searchParams.set("scope", SCOPES);
+      authUrl.searchParams.set("response_mode", "query");
+      authUrl.searchParams.set("code_challenge", challenge);
+      authUrl.searchParams.set("code_challenge_method", "S256");
+      authUrl.searchParams.set("prompt", "select_account");
+
+      window.location.href = authUrl.toString();
+
+    } catch (e) {
+      try { microsoftTeams.authentication.notifyFailure(e.message || String(e)); } catch {}
+      showErr(e.message || String(e));
     }
-
-    // Check for error in query string too
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("error")) {
-      microsoftTeams.authentication.notifyFailure(urlParams.get("error_description") || urlParams.get("error"));
-      return;
-    }
-
-    // ── Step 1: First load — redirect to Microsoft login ──
-    const nonce = generateNonce();
-    const state = generateNonce();
-    sessionStorage.setItem("teams_auth_nonce", nonce);
-    sessionStorage.setItem("teams_auth_state", state);
-
-    const authUrl = new URL(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize`);
-    authUrl.searchParams.set("client_id", CLIENT_ID);
-    authUrl.searchParams.set("response_type", "token");
-    authUrl.searchParams.set("redirect_uri", REDIRECT);
-    authUrl.searchParams.set("scope", SCOPES);
-    authUrl.searchParams.set("nonce", nonce);
-    authUrl.searchParams.set("state", state);
-    authUrl.searchParams.set("response_mode", "fragment");
-    authUrl.searchParams.set("prompt", "select_account");
-
-    window.location.href = authUrl.toString();
   })();
 </script>
 </body>
