@@ -61,9 +61,11 @@ async function getMsal() {
       clientId: MSAL_CONFIG.clientId,
       authority: `https://login.microsoftonline.com/${MSAL_CONFIG.tenantId}`,
       redirectUri: MSAL_CONFIG.redirectUri,
+      // blank.html is used by ssoSilent for the hidden iframe — must be registered in Azure
+      navigateToLoginRequestUrl: false,
     },
     cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: false },
-    system: { allowNativeBroker: false },
+    system: { allowNativeBroker: false, iframeHashTimeout: 10000 },
   });
   await _msal.initialize();
   return _msal;
@@ -87,26 +89,32 @@ async function getToken() {
   const msal = await getMsal();
 
   if (isInTeams()) {
-    // Try to get the Teams user's login hint for a silent token request
     const loginHint = await getTeamsLoginHint();
     const accounts = msal.getAllAccounts();
     const account = loginHint
       ? accounts.find(a => a.username?.toLowerCase() === loginHint.toLowerCase()) || accounts[0]
       : accounts[0];
 
+    // 1st attempt: silent with existing cached account
     if (account) {
       try {
         const r = await msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
         return r.accessToken;
-      } catch { /* fall through to ssoSilent */ }
+      } catch { /* fall through */ }
     }
 
-    // ssoSilent: MSAL uses the Teams session cookie to get a token without any UI
+    // 2nd attempt: ssoSilent via hidden iframe — requires blank.html registered in Azure
     try {
-      const r = await msal.ssoSilent({ scopes: GRAPH_SCOPES, loginHint: loginHint || undefined });
+      const ssoRequest = {
+        scopes: GRAPH_SCOPES,
+        redirectUri: `${MSAL_CONFIG.redirectUri}/blank.html`,
+      };
+      if (loginHint) ssoRequest.loginHint = loginHint;
+      const r = await msal.ssoSilent(ssoRequest);
       return r.accessToken;
     } catch(e) {
-      throw new Error("Teams silent SSO failed — ensure app is consented in Azure: " + e.message);
+      // ssoSilent failed — user needs to click Connect Outlook
+      throw new Error("NOT_SIGNED_IN");
     }
   }
 
@@ -209,14 +217,20 @@ export default function App() {
     (async () => {
       try {
         if (isInTeams()) {
-          // Auto-SSO in Teams — MSAL ssoSilent uses the existing Teams session
-          const token = await getToken();
-          const res = await fetch(`${GRAPH_BASE}/me?$select=displayName,mail,userPrincipalName`, {
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
-          });
-          const user = await res.json();
-          setUserInfo(user);
-          setAuthState("signed-in");
+          // Auto-SSO in Teams — try ssoSilent, fall back gracefully to showing Connect button
+          try {
+            const token = await getToken();
+            const res = await fetch(`${GRAPH_BASE}/me?$select=displayName,mail,userPrincipalName`, {
+              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+            });
+            const user = await res.json();
+            setUserInfo(user);
+            setAuthState("signed-in");
+          } catch(e) {
+            // Silent SSO not yet possible — user will see Connect Outlook button
+            setAuthState("idle");
+            return;
+          }
         } else {
           // Browser: check for existing MSAL session or redirect result
           const msal = await getMsal();
