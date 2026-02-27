@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 const MSAL_CONFIG = {
   clientId: "0c2d3aa6-1e8d-4c4a-a290-9a8590b5597b",
   tenantId: "24067079-ff6a-4c4e-a5de-7c5ac7ddf4d8",
-  redirectUri: window.location.origin,
+  redirectUri: "https://mountmeru-rooms.vercel.app",
 };
 const GRAPH_SCOPES = ["Calendars.ReadWrite", "User.Read"];
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
