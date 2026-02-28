@@ -4,7 +4,7 @@
     {
       "name": "Vite Dev Server",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["node_modules/vite/bin/vite.js"],
+      "runtimeArgs": ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1"],
       "port": 5173
     },
     {
