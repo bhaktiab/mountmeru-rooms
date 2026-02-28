@@ -152,7 +152,11 @@ async function getToken() {
   }
   const msal = await getMsal();
   const accounts = msal.getAllAccounts();
-  if (!accounts.length) throw new Error("NOT_SIGNED_IN");
+  if (!accounts.length) {
+    // No cached session — start login redirect (works on mobile; page navigates away).
+    await msal.loginRedirect({ scopes: GRAPH_SCOPES });
+    return null;
+  }
   try {
     const r = await msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: accounts[0] });
     return r.accessToken;
