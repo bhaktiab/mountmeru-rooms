@@ -13,9 +13,9 @@ const BOOKING_TAG = "MountmeruRoomBooking";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ROOMS = [
-  { id: "serengeti", name: "Serengeti", capacity: 7, color: "#C8A96E", accent: "#7A5C10", light: "#FDF3E0" },
-  { id: "tarangire", name: "Tarangire", capacity: 3, color: "#6BADA0", accent: "#1E6657", light: "#E6F5F2" },
-  { id: "ruaha",     name: "Ruaha",     capacity: 2, color: "#D47E6A", accent: "#8B3020", light: "#FDEEE9" },
+  { id: "serengeti", name: "Serengeti", capacity: 7, color: "#C8A96E", accent: "#7A5C10", light: "#FDF3E0", mailbox: "Serengeti@mountmerugroup.com" },
+  { id: "tarangire", name: "Tarangire", capacity: 3, color: "#6BADA0", accent: "#1E6657", light: "#E6F5F2", mailbox: "Tarangire@mountmerugroup.com" },
+  { id: "ruaha",     name: "Ruaha",     capacity: 2, color: "#D47E6A", accent: "#8B3020", light: "#FDEEE9", mailbox: "RUAHA@mountmerugroup.com" },
 ];
 
 const HOURS = Array.from({ length: 26 }, (_, i) => {
@@ -185,7 +185,7 @@ function getTimezone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
-async function createOutlookEvent({ roomName, bookerName, bookerEmail, emailList, date, startHour, endHour, meetingTitle }) {
+async function createOutlookEvent({ roomName, roomMailbox, bookerName, bookerEmail, emailList, date, startHour, endHour, meetingTitle }) {
   const tz = getTimezone();
   const attendees = emailList
     .filter(isValidEmail)
@@ -194,6 +194,11 @@ async function createOutlookEvent({ roomName, bookerName, bookerEmail, emailList
   // Always add the organizer if not already in list
   if (bookerEmail && !emailList.map(e => e.trim().toLowerCase()).includes(bookerEmail.toLowerCase())) {
     attendees.unshift({ emailAddress: { address: bookerEmail }, type: "required" });
+  }
+
+  // Add room mailbox as a resource so Exchange blocks the slot for everyone
+  if (roomMailbox && isValidEmail(roomMailbox)) {
+    attendees.push({ emailAddress: { address: roomMailbox }, type: "resource" });
   }
 
   const body = {
@@ -217,14 +222,31 @@ async function deleteOutlookEvent(id) {
   return gFetch(`/me/events/${id}`, { method: "DELETE" });
 }
 
-async function fetchOutlookBookings(date) {
+// Queries each room's mailbox calendar so ALL users see the same availability.
+// This replaces the old /me/calendarView approach which only showed the current
+// user's own bookings, allowing double-booking by other users.
+async function fetchRoomCalendarBookings(date) {
   const tz = getTimezone();
   const start = encodeURIComponent(`${date}T00:00:00`);
   const end   = encodeURIComponent(`${date}T23:59:59`);
-  const data  = await gFetch(
-    `/me/calendarView?startDateTime=${start}&endDateTime=${end}&$select=id,subject,start,end,location,body,organizer&$top=50&$orderby=start/dateTime`
+  const preferTz = { Prefer: `outlook.timezone="${tz}"` };
+
+  const results = {};
+  await Promise.all(
+    ROOMS.map(async room => {
+      if (!room.mailbox) { results[room.id] = []; return; }
+      try {
+        const data = await gFetch(
+          `/users/${encodeURIComponent(room.mailbox)}/calendarView?startDateTime=${start}&endDateTime=${end}&$select=id,subject,start,end,organizer&$top=50&$orderby=start/dateTime`,
+          { headers: preferTz }
+        );
+        results[room.id] = data?.value || [];
+      } catch {
+        results[room.id] = [];
+      }
+    })
   );
-  return (data?.value || []).filter(e => (e.body?.content || "").includes(BOOKING_TAG));
+  return results;
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -284,18 +306,37 @@ export default function App() {
   const syncFromOutlook = useCallback(async (date) => {
     setSyncStatus("syncing");
     try {
-      const events = await fetchOutlookBookings(date);
+      // Query each room's mailbox calendar — this is the source of truth shared
+      // across all users, so every user sees the same blocked slots.
+      const roomData = await fetchRoomCalendarBookings(date);
       const slots = initSlots();
-      events.forEach(evt => {
-        const loc = evt.location?.displayName || "";
-        const room = ROOMS.find(r => loc.startsWith(r.name));
-        if (!room) return;
-        const startH = evt.start.dateTime.slice(11, 16);
-        const endH   = evt.end.dateTime.slice(11, 16);
-        const match  = evt.subject.match(/\] (.+)$/);
-        const name   = match ? match[1] : evt.subject;
-        slots[room.id][startH] = { name, endHour: endH, outlookEventId: evt.id, synced: true };
+
+      ROOMS.forEach(room => {
+        (roomData[room.id] || []).forEach(evt => {
+          const startH = evt.start.dateTime.slice(11, 16);
+          const endH   = evt.end.dateTime.slice(11, 16);
+          const startIdx = HOURS.findIndex(h => h.value === startH);
+          const endIdx   = HOURS.findIndex(h => h.value === endH);
+          if (startIdx === -1) return;
+
+          const name = evt.organizer?.emailAddress?.name || evt.subject || "Reserved";
+          const organizerEmail = evt.organizer?.emailAddress?.address || "";
+          const endHourVal = endIdx >= 0 ? HOURS[endIdx]?.value : endH;
+          const limit = endIdx >= 0 ? endIdx : HOURS.length;
+
+          for (let i = startIdx; i < limit && i < HOURS.length; i++) {
+            slots[room.id][HOURS[i].value] = {
+              name,
+              endHour: endHourVal,
+              outlookEventId: evt.id,
+              organizerEmail,
+              synced: true,
+              isSpan: i > startIdx,
+            };
+          }
+        });
       });
+
       setDateBookings(prev => ({ ...prev, [date]: slots }));
       setSyncStatus("synced");
     } catch (e) {
@@ -394,6 +435,7 @@ export default function App() {
       try {
         const evt = await createOutlookEvent({
           roomName: room.name,
+          roomMailbox: room.mailbox,
           bookerName: form.name,
           bookerEmail: form.email,
           emailList: form.emails,
@@ -567,7 +609,9 @@ export default function App() {
                               {booking.emails?.length>0 && <span style={{ marginLeft:5 }}>👥 {booking.emails.length}</span>}
                             </div>
                           </div>
-                          <button className="cancel-btn" onClick={()=>handleCancel(room.id,value)} title="Cancel">✕</button>
+                          {(!booking.synced || !booking.organizerEmail || booking.organizerEmail.toLowerCase() === (userInfo?.mail || userInfo?.userPrincipalName || "").toLowerCase()) && (
+                            <button className="cancel-btn" onClick={()=>handleCancel(room.id,value)} title="Cancel">✕</button>
+                          )}
                         </div>
                       ) : (() => {
                           const past = isPastSlot(activeDate, value);
