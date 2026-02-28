@@ -3,120 +3,156 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mountmeru Room Booking — Teams Config</title>
+  <title>Mount Meru Room Booking — Teams Setup</title>
   <script src="https://res.cdn.office.net/teams-js/2.22.0/js/MicrosoftTeams.min.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Open+Sans:wght@400;600;700&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #FAF8F4;
+      font-family: 'Open Sans', 'Segoe UI', sans-serif;
+      background: #F7F7F7;
       display: flex;
       align-items: center;
       justify-content: center;
       min-height: 100vh;
-      padding: 32px;
+      padding: 24px;
     }
+
     .card {
       background: white;
-      border-radius: 12px;
+      border-radius: 16px;
       padding: 36px 40px;
-      max-width: 420px;
+      max-width: 440px;
       width: 100%;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      box-shadow: 0 4px 28px rgba(0,0,0,.09);
+      border-top: 4px solid #CC1515;
     }
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 24px;
+
+    /* Logo */
+    .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+    .logo-title { font-family: 'Montserrat', sans-serif; font-size: 20px; font-weight: 800; color: #231F20; }
+    .logo-sub   { font-size: 10px; color: #CC1515; letter-spacing: 2.5px; text-transform: uppercase; margin-top: 2px; font-weight: 700; }
+
+    /* Headings */
+    h2 { font-size: 16px; font-weight: 700; color: #231F20; margin-bottom: 6px; font-family: 'Montserrat', sans-serif; }
+    .desc { font-size: 13px; color: #777; line-height: 1.65; margin-bottom: 24px; }
+
+    /* Option list */
+    .options { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
+    .option {
+      display: flex; align-items: center; gap: 14px;
+      padding: 13px 16px; border-radius: 10px; border: 2px solid #E8E8E8;
+      cursor: pointer; transition: all .15s; user-select: none;
     }
-    .logo-dot {
-      width: 32px; height: 32px;
-      background: #2C2416;
-      border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
+    .option:hover  { border-color: #CC1515; background: #FFF6F6; }
+    .option.active { border-color: #CC1515; background: #FFF0F0; box-shadow: 0 0 0 3px rgba(204,21,21,.1); }
+
+    .opt-dot  { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .opt-body { flex: 1; }
+    .opt-name { font-size: 14px; font-weight: 700; color: #231F20; }
+    .opt-desc { font-size: 11px; color: #AAA; margin-top: 2px; }
+
+    /* Radio indicator */
+    .opt-radio {
+      width: 18px; height: 18px; border-radius: 50%; border: 2px solid #DDDDDD;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: border .15s;
     }
-    .logo-dot svg { width: 18px; height: 18px; }
-    .logo-text { font-size: 18px; font-weight: 600; color: #2C2416; letter-spacing: 0.3px; }
-    .logo-sub { font-size: 11px; color: #B09060; letter-spacing: 2px; text-transform: uppercase; }
-    h2 { font-size: 15px; color: #2C2416; margin-bottom: 6px; }
-    p  { font-size: 13px; color: #888; line-height: 1.6; margin-bottom: 24px; }
-    .rooms { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
-    .room {
-      display: flex; align-items: center; gap: 12px;
-      padding: 12px 14px;
-      border-radius: 8px;
-      border: 2px solid #EEE8DF;
-      cursor: pointer;
-      transition: all 0.15s;
+    .option.active .opt-radio { border-color: #CC1515; }
+    .opt-radio-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #CC1515;
+      display: none;
     }
-    .room:hover { border-color: #C8A96E; background: #FDF3E0; }
-    .room.selected { border-color: #C8A96E; background: #FDF3E0; }
-    .room-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-    .room-name { font-size: 14px; font-weight: 600; color: #2C2416; }
-    .room-cap  { font-size: 11px; color: #AAA; margin-top: 1px; }
-    .all-rooms { border-color: #2C2416 !important; }
-    .all-rooms.selected { background: #F5F0E8 !important; }
-    .note { font-size: 11px; color: #BBB; text-align: center; margin-top: -12px; }
+    .option.active .opt-radio-dot { display: block; }
+
+    .footer-note {
+      text-align: center; font-size: 11px; color: #BBBBBB;
+      padding: 12px 0 0; border-top: 1px solid #EEEEEE;
+    }
+    .tip {
+      background: #FFF8E1; border-radius: 8px; padding: 10px 14px;
+      font-size: 12px; color: #9A6F00; margin-bottom: 24px; line-height: 1.5;
+    }
   </style>
 </head>
 <body>
 <div class="card">
   <div class="logo">
-    <div class="logo-dot">
-      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
-        <rect x="3" y="3" width="18" height="18" rx="2"/>
-        <path d="M3 9h18M9 21V9"/>
-      </svg>
-    </div>
+    <svg width="44" height="44" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="40" height="40" rx="9" fill="white" stroke="#E8E8E8" stroke-width="1"/>
+      <!-- Yellow oil drop -->
+      <path d="M8,4 C14,8 15,26 8,34 C1,26 2,8 8,4Z" fill="#F7B731"/>
+      <!-- Red bold lowercase "m": three legs + two arched humps -->
+      <path d="M17,34 L17,22 Q22,10 27,22 L27,34 M27,22 Q32,10 37,22 L37,34"
+            fill="none" stroke="#CC1515" stroke-width="5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
     <div>
-      <div class="logo-text">Mountmeru</div>
+      <div class="logo-title">Mount Meru</div>
       <div class="logo-sub">Room Booking</div>
     </div>
   </div>
 
-  <h2>Choose what to show in this tab</h2>
-  <p>Select a specific room or show all rooms. You can add multiple tabs — one per room — or a single tab for everything.</p>
+  <h2>Configure this Teams tab</h2>
+  <p class="desc">
+    Choose which rooms to display in this tab. You can add multiple tabs — one per room — or a
+    single tab showing all rooms. All users in your organization will share the same view.
+  </p>
 
-  <div class="rooms">
-    <div class="room all-rooms selected" data-url="https://mountmeru-rooms.vercel.app" data-name="All Rooms" onclick="selectRoom(this)">
-      <div class="room-dot" style="background:#2C2416"></div>
-      <div>
-        <div class="room-name">All Rooms</div>
-        <div class="room-cap">Serengeti · Tarangire · Ruaha</div>
+  <div class="tip">
+    💡 For all-in-one access, choose <strong>All Rooms</strong>. To dedicate a channel to a specific
+    meeting room, choose that room below.
+  </div>
+
+  <div class="options" id="options">
+    <div class="option active" data-url="https://mountmeru-rooms.vercel.app" data-name="All Rooms">
+      <div class="opt-dot" style="background:#231F20"></div>
+      <div class="opt-body">
+        <div class="opt-name">All Rooms</div>
+        <div class="opt-desc">Serengeti (7p) · Tarangire (3p) · Ruaha (2p)</div>
       </div>
+      <div class="opt-radio"><div class="opt-radio-dot"></div></div>
     </div>
-    <div class="room" data-url="https://mountmeru-rooms.vercel.app?room=serengeti" data-name="Serengeti" onclick="selectRoom(this)">
-      <div class="room-dot" style="background:#C8A96E"></div>
-      <div>
-        <div class="room-name">Serengeti</div>
-        <div class="room-cap">7 pax max</div>
+
+    <div class="option" data-url="https://mountmeru-rooms.vercel.app?room=serengeti" data-name="Serengeti">
+      <div class="opt-dot" style="background:#CC1515"></div>
+      <div class="opt-body">
+        <div class="opt-name">Serengeti</div>
+        <div class="opt-desc">Large conference room · 7 person max</div>
       </div>
+      <div class="opt-radio"><div class="opt-radio-dot"></div></div>
     </div>
-    <div class="room" data-url="https://mountmeru-rooms.vercel.app?room=tarangire" data-name="Tarangire" onclick="selectRoom(this)">
-      <div class="room-dot" style="background:#6BADA0"></div>
-      <div>
-        <div class="room-name">Tarangire</div>
-        <div class="room-cap">3 pax max</div>
+
+    <div class="option" data-url="https://mountmeru-rooms.vercel.app?room=tarangire" data-name="Tarangire">
+      <div class="opt-dot" style="background:#5BA89C"></div>
+      <div class="opt-body">
+        <div class="opt-name">Tarangire</div>
+        <div class="opt-desc">Small meeting room · 3 person max</div>
       </div>
+      <div class="opt-radio"><div class="opt-radio-dot"></div></div>
     </div>
-    <div class="room" data-url="https://mountmeru-rooms.vercel.app?room=ruaha" data-name="Ruaha" onclick="selectRoom(this)">
-      <div class="room-dot" style="background:#D47E6A"></div>
-      <div>
-        <div class="room-name">Ruaha</div>
-        <div class="room-cap">2 pax max</div>
+
+    <div class="option" data-url="https://mountmeru-rooms.vercel.app?room=ruaha" data-name="Ruaha">
+      <div class="opt-dot" style="background:#E8963C"></div>
+      <div class="opt-body">
+        <div class="opt-name">Ruaha</div>
+        <div class="opt-desc">Huddle room · 2 person max</div>
       </div>
+      <div class="opt-radio"><div class="opt-radio-dot"></div></div>
     </div>
   </div>
-  <p class="note">Click Save in Teams to confirm</p>
+
+  <p class="footer-note">Click <strong>Save</strong> in the Teams dialog above to confirm your selection.</p>
 </div>
 
 <script>
   let selectedUrl  = "https://mountmeru-rooms.vercel.app";
   let selectedName = "All Rooms";
 
+  // Initialize Teams SDK
   microsoftTeams.app.initialize().then(() => {
-    microsoftTeams.pages.config.registerOnSaveHandler((saveEvent) => {
+    microsoftTeams.pages.config.registerOnSaveHandler(saveEvent => {
       microsoftTeams.pages.config.setConfig({
         suggestedDisplayName: selectedName,
         entityId: "mountmeru-" + selectedName.toLowerCase().replace(/\s+/g, "-"),
@@ -128,12 +164,15 @@
     microsoftTeams.pages.config.setValidityState(true);
   });
 
-  function selectRoom(el) {
-    document.querySelectorAll('.room').forEach(r => r.classList.remove('selected'));
-    el.classList.add('selected');
-    selectedUrl  = el.dataset.url;
-    selectedName = el.dataset.name;
-  }
+  // Room selection
+  document.querySelectorAll(".option").forEach(el => {
+    el.addEventListener("click", () => {
+      document.querySelectorAll(".option").forEach(o => o.classList.remove("active"));
+      el.classList.add("active");
+      selectedUrl  = el.dataset.url;
+      selectedName = el.dataset.name;
+    });
+  });
 </script>
 </body>
 </html>
