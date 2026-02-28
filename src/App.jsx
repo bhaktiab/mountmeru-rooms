@@ -75,7 +75,8 @@ function loadSettings() {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) return JSON.parse(raw);
   } catch {}
-  return { roomEmails: { serengeti: "", tarangire: "", ruaha: "" } };
+  // Default to the ROOMS mailbox values so doSync works without manual setup.
+  return { roomEmails: Object.fromEntries(ROOMS.map(r => [r.id, r.mailbox || ""])) };
 }
 
 function persistSettings(s) {
@@ -135,7 +136,7 @@ async function getMsal() {
       authority: `https://login.microsoftonline.com/${TENANT_ID}`,
       redirectUri: REDIRECT_URI,
     },
-    cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: false },
+    cache: { cacheLocation: "localStorage", storeAuthStateInCookie: true },
     system: { allowNativeBroker: false },
   });
   await _msal.initialize();
@@ -232,50 +233,36 @@ async function deleteOutlookEvent(id) {
   return gFetch(`/me/events/${id}`, { method: "DELETE" });
 }
 
-async function createOutlookEvent({ roomName, roomMailbox, bookerName, bookerEmail, emailList, date, startHour, endHour, meetingTitle }) {
-  const tz = getTimezone();
-  const attendees = emailList
-    .filter(isValidEmail)
-    .map(e => ({ emailAddress: { address: e.trim() }, type: "required" }));
-
+// Fetch bookings from the signed-in user's own calendar (fallback / pending-acceptance)
 async function fetchOwnCalendar(date) {
+  const tz = getTimezone();
   const s = encodeURIComponent(`${date}T00:00:00`);
   const e = encodeURIComponent(`${date}T23:59:59`);
   const data = await gFetch(
-    `/me/calendarView?startDateTime=${s}&endDateTime=${e}&$select=id,subject,start,end,organizer,body,location,attendees&$top=50&$orderby=start/dateTime`
+    `/me/calendarView?startDateTime=${s}&endDateTime=${e}&$select=id,subject,start,end,organizer,body,location&$top=50&$orderby=start/dateTime`,
+    { headers: { Prefer: `outlook.timezone="${tz}"` } }
   );
   return (data?.value || []).filter(ev => (ev.body?.content || "").includes(BOOKING_TAG));
-}
-
-  // Add room mailbox as a resource so Exchange blocks the slot for everyone
-  if (roomMailbox && isValidEmail(roomMailbox)) {
-    attendees.push({ emailAddress: { address: roomMailbox }, type: "resource" });
-  }
-
-  const body = {
-    subject: meetingTitle || `[${roomName}] ${bookerName}`,
-    body: {
-      contentType: "HTML",
-      content: `<p>Room: <strong>${roomName}</strong></p><p>Booked by: ${bookerName}</p><p>Attendees: ${attendees.length}</p><p><em>Booked via Mountmeru Room Booking</em></p><p style="display:none">${BOOKING_TAG}</p>`,
-    },
-    start: { dateTime: toLocalISO(date, startHour), timeZone: tz },
-    end:   { dateTime: toLocalISO(date, endHour),   timeZone: tz },
-    location: { displayName: `${roomName} — Mountmeru` },
-    attendees,
-    isOrganizer: true,
-    responseRequested: true,
-  };
 }
 
 function buildRoomSlots(events) {
   const roomSlots = Object.fromEntries(HOURS.map(h => [h.value, null]));
   events.forEach(evt => {
-    const info = eventToSlotInfo(evt);
-    if (!info) return;
-    const startIdx = HOURS.findIndex(h => h.value === info.startHour);
-    const endIdx   = HOURS.findIndex(h => h.value === info.endHour);
+    const startH = evt.start?.dateTime?.slice(11, 16);
+    const endH   = evt.end?.dateTime?.slice(11, 16);
+    if (!startH) return;
+    const startIdx = HOURS.findIndex(h => h.value === startH);
+    const endIdx   = HOURS.findIndex(h => h.value === endH);
     if (startIdx === -1) return;
     const endSafe = endIdx === -1 ? HOURS.length : endIdx;
+    const info = {
+      name:           evt.organizer?.emailAddress?.name || evt.subject || "Reserved",
+      organizerEmail: evt.organizer?.emailAddress?.address || "",
+      outlookEventId: evt.id,
+      startHour:      startH,
+      endHour:        endH,
+      synced:         true,
+    };
     for (let i = startIdx; i < endSafe; i++) {
       roomSlots[HOURS[i].value] = { ...info, isSpan: i > startIdx };
     }
@@ -283,32 +270,75 @@ function buildRoomSlots(events) {
   return roomSlots;
 }
 
-// Queries each room's mailbox calendar so ALL users see the same availability.
-// This replaces the old /me/calendarView approach which only showed the current
-// user's own bookings, allowing double-booking by other users.
-async function fetchRoomCalendarBookings(date) {
-  const tz = getTimezone();
+// Fetch a single room's mailbox calendar for a given date.
+async function fetchRoomCalendar(email, date) {
+  const tz    = getTimezone();
   const start = encodeURIComponent(`${date}T00:00:00`);
   const end   = encodeURIComponent(`${date}T23:59:59`);
-  const preferTz = { Prefer: `outlook.timezone="${tz}"` };
-
-  const results = {};
-  await Promise.all(
-    ROOMS.map(async room => {
-      if (!room.mailbox) { results[room.id] = []; return; }
-      try {
-        const data = await gFetch(
-          `/users/${encodeURIComponent(room.mailbox)}/calendarView?startDateTime=${start}&endDateTime=${end}&$select=id,subject,start,end,organizer&$top=50&$orderby=start/dateTime`,
-          { headers: preferTz }
-        );
-        results[room.id] = data?.value || [];
-      } catch {
-        results[room.id] = [];
-      }
-    })
+  const data  = await gFetch(
+    `/users/${encodeURIComponent(email)}/calendarView?startDateTime=${start}&endDateTime=${end}&$select=id,subject,start,end,organizer&$top=50&$orderby=start/dateTime`,
+    { headers: { Prefer: `outlook.timezone="${tz}"` } }
   );
-  return results;
+  return data?.value || [];
 }
+
+// Distribute events from the signed-in user's own calendar into per-room slots,
+// matched by location display name. Used as a fallback when room calendars are
+// unavailable or haven't yet accepted the invite.
+function buildSlotsFromOwnCalendar(events) {
+  const slots = Object.fromEntries(
+    ROOMS.map(r => [r.id, Object.fromEntries(HOURS.map(h => [h.value, null]))])
+  );
+  events.forEach(evt => {
+    const loc  = (evt.location?.displayName || evt.subject || "").toLowerCase();
+    const room = ROOMS.find(r => loc.includes(r.name.toLowerCase()));
+    if (!room) return;
+    const startH = evt.start?.dateTime?.slice(11, 16);
+    const endH   = evt.end?.dateTime?.slice(11, 16);
+    if (!startH) return;
+    const startIdx = HOURS.findIndex(h => h.value === startH);
+    const endIdx   = HOURS.findIndex(h => h.value === endH);
+    if (startIdx === -1) return;
+    const endSafe = endIdx === -1 ? HOURS.length : endIdx;
+    const info = {
+      name:           evt.organizer?.emailAddress?.name || evt.subject || "Reserved",
+      organizerEmail: evt.organizer?.emailAddress?.address || "",
+      outlookEventId: evt.id,
+      startHour:      startH,
+      endHour:        endH,
+      synced:         false, // pending room acceptance
+    };
+    for (let i = startIdx; i < endSafe; i++) {
+      slots[room.id][HOURS[i].value] = { ...info, isSpan: i > startIdx };
+    }
+  });
+  return slots;
+}
+
+// Returns free/busy status for a list of emails over a time window.
+// Result: { email: 0 (free) | 1 (tentative) | 2 (busy) }
+async function getSchedule(emails, date, startHour, endHour) {
+  if (!emails?.length) return {};
+  const tz   = getTimezone();
+  const data = await gFetch("/me/calendar/getSchedule", {
+    method: "POST",
+    body: JSON.stringify({
+      schedules:                emails,
+      startTime:                { dateTime: `${date}T${startHour}:00`, timeZone: tz },
+      endTime:                  { dateTime: `${date}T${endHour}:00`,   timeZone: tz },
+      availabilityViewInterval: 30,
+    }),
+  });
+  const result = {};
+  (data?.value || []).forEach(item => {
+    // availabilityView is a string of digits per 30-min slot: 0=free,1=tentative,2=busy
+    const worst = (item.availabilityView || "")
+      .split("").reduce((a, c) => Math.max(a, parseInt(c) || 0), 0);
+    result[item.scheduleId] = worst;
+  });
+  return result;
+}
+
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
@@ -336,6 +366,7 @@ export default function App() {
   const [peopleSugg, setPeopleSugg]   = useState([]);
   const [showSugg, setShowSugg]       = useState(false);
   const [currentTime, setCurrentTime] = useState(() => new Date());
+  const [availability, setAvailability] = useState({}); // email → 0=free|1=tentative|2=busy
 
   const searchTimer  = useRef(null);
   const refreshTimer = useRef(null);
@@ -354,6 +385,22 @@ export default function App() {
     const t = setInterval(() => setCurrentTime(new Date()), 30_000);
     return () => clearInterval(t);
   }, []);
+
+  // ── Attendee availability ──
+  useEffect(() => {
+    if (!modal || !form.emails.length || !form.endHour || authState !== "signed-in") {
+      setAvailability({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const av = await getSchedule(form.emails, activeDate, modal.startHour, form.endHour);
+        if (!cancelled) setAvailability(av);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [form.emails, form.endHour, modal, activeDate, authState]);
 
   // ── Sync ──
   const doSync = useCallback(async (date, settingsOverride) => {
@@ -401,72 +448,58 @@ export default function App() {
     }
   }, [settings, showToast]);
 
-  // ── Auth init (browser) ──
+  // ── Auth init ──
   useEffect(() => {
     (async () => {
       try {
-        if (isInTeams()) { setAuthState("idle"); return; }
+        if (isInTeams()) {
+          // Teams: auto-attempt the popup auth on load; falls back to idle if blocked.
+          setAuthState("signing-in");
+          try {
+            const token = await Promise.race([
+              teamsAuthenticate(),
+              new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8000)),
+            ]);
+            _teamsToken = token; _teamsTokenExpiry = Date.now() + 3_600_000;
+            const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
+            setUserInfo(user); setAuthState("signed-in");
+          } catch { setAuthState("idle"); }
+          return;
+        }
+
+        // Browser: process any redirect result first.
         const msal   = await getMsal();
         const result = await msal.handleRedirectPromise();
         if (result?.account) {
           const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
           setUserInfo(user); setAuthState("signed-in");
           showToast(`Welcome, ${user.displayName}`);
-        } else {
-          const accounts = msal.getAllAccounts();
-          if (accounts.length) {
+          return;
+        }
+
+        // Try ssoSilent — succeeds if the user has an active M365 session in this browser.
+        try {
+          const sso = await msal.ssoSilent({ scopes: GRAPH_SCOPES });
+          if (sso?.account) {
             const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
             setUserInfo(user); setAuthState("signed-in");
+            return;
           }
+        } catch {}
+
+        // Fall back to silently restoring a cached MSAL session.
+        const accounts = msal.getAllAccounts();
+        if (accounts.length) {
+          try {
+            await msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: accounts[0] });
+            const user = await gFetch("/me?$select=displayName,mail,userPrincipalName");
+            setUserInfo(user); setAuthState("signed-in");
+          } catch { setAuthState("idle"); }
         }
       } catch { setAuthState("idle"); }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // ── Sync from Outlook ──
-  const syncFromOutlook = useCallback(async (date) => {
-    setSyncStatus("syncing");
-    try {
-      // Query each room's mailbox calendar — this is the source of truth shared
-      // across all users, so every user sees the same blocked slots.
-      const roomData = await fetchRoomCalendarBookings(date);
-      const slots = initSlots();
-
-      ROOMS.forEach(room => {
-        (roomData[room.id] || []).forEach(evt => {
-          const startH = evt.start.dateTime.slice(11, 16);
-          const endH   = evt.end.dateTime.slice(11, 16);
-          const startIdx = HOURS.findIndex(h => h.value === startH);
-          const endIdx   = HOURS.findIndex(h => h.value === endH);
-          if (startIdx === -1) return;
-
-          const name = evt.organizer?.emailAddress?.name || evt.subject || "Reserved";
-          const organizerEmail = evt.organizer?.emailAddress?.address || "";
-          const endHourVal = endIdx >= 0 ? HOURS[endIdx]?.value : endH;
-          const limit = endIdx >= 0 ? endIdx : HOURS.length;
-
-          for (let i = startIdx; i < limit && i < HOURS.length; i++) {
-            slots[room.id][HOURS[i].value] = {
-              name,
-              endHour: endHourVal,
-              outlookEventId: evt.id,
-              organizerEmail,
-              synced: true,
-              isSpan: i > startIdx,
-            };
-          }
-        });
-      });
-
-      setDateBookings(prev => ({ ...prev, [date]: slots }));
-      setSyncStatus("synced");
-    } catch (e) {
-      setSyncStatus("error");
-      showToast("Outlook sync failed: " + e.message, "error");
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeDate, authState]);
 
   // ── Auto-refresh ──
   useEffect(() => {
@@ -596,7 +629,7 @@ export default function App() {
       try {
         const evt = await createOutlookEvent({
           roomName: room.name,
-          roomMailbox: room.mailbox,
+          roomEmail: room.mailbox,
           bookerName: form.name,
           bookerEmail: form.email,
           emailList:   form.emails,
@@ -1002,11 +1035,17 @@ export default function App() {
                 </div>
                 {form.emails.length > 0 && (
                   <div className="tag-list">
-                    {form.emails.map(e => (
-                      <span key={e} className="tag">
-                        {e}<button onClick={() => removeEmail(e)}>×</button>
-                      </span>
-                    ))}
+                    {form.emails.map(e => {
+                      const av  = availability[e];
+                      const dot = av === 2 ? "🔴" : av === 1 ? "🟡" : av === 0 ? "🟢" : "⚪";
+                      const tip = av === 2 ? "Busy" : av === 1 ? "Tentative" : av === 0 ? "Free" : "Checking…";
+                      return (
+                        <span key={e} className="tag">
+                          <span title={tip} style={{ marginRight: 3 }}>{dot}</span>
+                          {e}<button onClick={() => removeEmail(e)}>×</button>
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
                 <div className="field-hint">Type a name to search the org directory, or enter an email and press Enter</div>
