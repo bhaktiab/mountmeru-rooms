@@ -16,9 +16,9 @@ const SETTINGS_KEY    = "mm_room_settings_v3";
 
 // ─── Room Definitions ─────────────────────────────────────────────────────────
 const ROOMS = [
-  { id: "serengeti", name: "Serengeti", capacity: 7,  color: "#CC1515", accent: "#8B0000", light: "#FFF0F0" },
-  { id: "tarangire", name: "Tarangire", capacity: 3,  color: "#5BA89C", accent: "#1E6657", light: "#E8F5F3" },
-  { id: "ruaha",     name: "Ruaha",     capacity: 2,  color: "#E8963C", accent: "#9A5800", light: "#FFF4E8" },
+  { id: "serengeti", name: "Serengeti", capacity: 7, color: "#C8A96E", accent: "#7A5C10", light: "#FDF3E0", mailbox: "Serengeti@mountmerugroup.com" },
+  { id: "tarangire", name: "Tarangire", capacity: 3, color: "#6BADA0", accent: "#1E6657", light: "#E6F5F2", mailbox: "Tarangire@mountmerugroup.com" },
+  { id: "ruaha",     name: "Ruaha",     capacity: 2, color: "#D47E6A", accent: "#8B3020", light: "#FDEEE9", mailbox: "RUAHA@mountmerugroup.com" },
 ];
 
 // ─── Time Slots (8 AM – 5:30 PM, 30-min intervals) ───────────────────────────
@@ -232,15 +232,11 @@ async function deleteOutlookEvent(id) {
   return gFetch(`/me/events/${id}`, { method: "DELETE" });
 }
 
-// ─── Calendar: Fetch ──────────────────────────────────────────────────────────
-async function fetchRoomCalendar(roomEmail, date) {
-  const s = encodeURIComponent(`${date}T00:00:00`);
-  const e = encodeURIComponent(`${date}T23:59:59`);
-  const data = await gFetch(
-    `/users/${encodeURIComponent(roomEmail)}/calendarView?startDateTime=${s}&endDateTime=${e}&$select=id,subject,start,end,organizer,body,attendees&$top=50&$orderby=start/dateTime`
-  );
-  return data?.value || [];
-}
+async function createOutlookEvent({ roomName, roomMailbox, bookerName, bookerEmail, emailList, date, startHour, endHour, meetingTitle }) {
+  const tz = getTimezone();
+  const attendees = emailList
+    .filter(isValidEmail)
+    .map(e => ({ emailAddress: { address: e.trim() }, type: "required" }));
 
 async function fetchOwnCalendar(date) {
   const s = encodeURIComponent(`${date}T00:00:00`);
@@ -251,24 +247,23 @@ async function fetchOwnCalendar(date) {
   return (data?.value || []).filter(ev => (ev.body?.content || "").includes(BOOKING_TAG));
 }
 
-// ─── Slot Builders ────────────────────────────────────────────────────────────
-function eventToSlotInfo(evt) {
-  const startH = (evt.start?.dateTime || "").slice(11, 16);
-  const endH   = (evt.end?.dateTime   || "").slice(11, 16);
-  if (!startH || !endH) return null;
-  const subjectMatch = evt.subject?.match(/\] (.+)$/);
-  return {
-    name: subjectMatch ? subjectMatch[1] : (evt.organizer?.emailAddress?.name || evt.subject || "Reserved"),
-    title: evt.subject || "",
-    organizer: evt.organizer?.emailAddress?.name || "",
-    organizerEmail: evt.organizer?.emailAddress?.address || "",
-    startHour: startH,
-    endHour: endH,
-    outlookEventId: evt.id,
-    attendeeCount: (evt.attendees || []).filter(a =>
-      a.emailAddress?.address && !Object.values(ROOMS).some(r => false) // include all
-    ).length,
-    synced: true,
+  // Add room mailbox as a resource so Exchange blocks the slot for everyone
+  if (roomMailbox && isValidEmail(roomMailbox)) {
+    attendees.push({ emailAddress: { address: roomMailbox }, type: "resource" });
+  }
+
+  const body = {
+    subject: meetingTitle || `[${roomName}] ${bookerName}`,
+    body: {
+      contentType: "HTML",
+      content: `<p>Room: <strong>${roomName}</strong></p><p>Booked by: ${bookerName}</p><p>Attendees: ${attendees.length}</p><p><em>Booked via Mountmeru Room Booking</em></p><p style="display:none">${BOOKING_TAG}</p>`,
+    },
+    start: { dateTime: toLocalISO(date, startHour), timeZone: tz },
+    end:   { dateTime: toLocalISO(date, endHour),   timeZone: tz },
+    location: { displayName: `${roomName} — Mountmeru` },
+    attendees,
+    isOrganizer: true,
+    responseRequested: true,
   };
 }
 
@@ -288,24 +283,31 @@ function buildRoomSlots(events) {
   return roomSlots;
 }
 
-function buildSlotsFromOwnCalendar(events) {
-  const slots = initSlots();
-  events.forEach(evt => {
-    const loc = evt.location?.displayName || "";
-    let room = ROOMS.find(r => loc.includes(r.name));
-    if (!room) room = ROOMS.find(r => evt.subject?.includes(`[${r.name}]`));
-    if (!room) return;
-    const info = eventToSlotInfo(evt);
-    if (!info) return;
-    const startIdx = HOURS.findIndex(h => h.value === info.startHour);
-    const endIdx   = HOURS.findIndex(h => h.value === info.endHour);
-    if (startIdx === -1) return;
-    const endSafe = endIdx === -1 ? HOURS.length : endIdx;
-    for (let i = startIdx; i < endSafe; i++) {
-      slots[room.id][HOURS[i].value] = { ...info, isSpan: i > startIdx };
-    }
-  });
-  return slots;
+// Queries each room's mailbox calendar so ALL users see the same availability.
+// This replaces the old /me/calendarView approach which only showed the current
+// user's own bookings, allowing double-booking by other users.
+async function fetchRoomCalendarBookings(date) {
+  const tz = getTimezone();
+  const start = encodeURIComponent(`${date}T00:00:00`);
+  const end   = encodeURIComponent(`${date}T23:59:59`);
+  const preferTz = { Prefer: `outlook.timezone="${tz}"` };
+
+  const results = {};
+  await Promise.all(
+    ROOMS.map(async room => {
+      if (!room.mailbox) { results[room.id] = []; return; }
+      try {
+        const data = await gFetch(
+          `/users/${encodeURIComponent(room.mailbox)}/calendarView?startDateTime=${start}&endDateTime=${end}&$select=id,subject,start,end,organizer&$top=50&$orderby=start/dateTime`,
+          { headers: preferTz }
+        );
+        results[room.id] = data?.value || [];
+      } catch {
+        results[room.id] = [];
+      }
+    })
+  );
+  return results;
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -422,11 +424,46 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Sync on auth/date change ──
-  useEffect(() => {
-    if (authState === "signed-in") {
-      if (!dateBookings[activeDate]) setDateBookings(p => ({ ...p, [activeDate]: initSlots() }));
-      doSync(activeDate);
+  // ── Sync from Outlook ──
+  const syncFromOutlook = useCallback(async (date) => {
+    setSyncStatus("syncing");
+    try {
+      // Query each room's mailbox calendar — this is the source of truth shared
+      // across all users, so every user sees the same blocked slots.
+      const roomData = await fetchRoomCalendarBookings(date);
+      const slots = initSlots();
+
+      ROOMS.forEach(room => {
+        (roomData[room.id] || []).forEach(evt => {
+          const startH = evt.start.dateTime.slice(11, 16);
+          const endH   = evt.end.dateTime.slice(11, 16);
+          const startIdx = HOURS.findIndex(h => h.value === startH);
+          const endIdx   = HOURS.findIndex(h => h.value === endH);
+          if (startIdx === -1) return;
+
+          const name = evt.organizer?.emailAddress?.name || evt.subject || "Reserved";
+          const organizerEmail = evt.organizer?.emailAddress?.address || "";
+          const endHourVal = endIdx >= 0 ? HOURS[endIdx]?.value : endH;
+          const limit = endIdx >= 0 ? endIdx : HOURS.length;
+
+          for (let i = startIdx; i < limit && i < HOURS.length; i++) {
+            slots[room.id][HOURS[i].value] = {
+              name,
+              endHour: endHourVal,
+              outlookEventId: evt.id,
+              organizerEmail,
+              synced: true,
+              isSpan: i > startIdx,
+            };
+          }
+        });
+      });
+
+      setDateBookings(prev => ({ ...prev, [date]: slots }));
+      setSyncStatus("synced");
+    } catch (e) {
+      setSyncStatus("error");
+      showToast("Outlook sync failed: " + e.message, "error");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDate, authState]);
@@ -558,9 +595,9 @@ export default function App() {
     if (authState === "signed-in") {
       try {
         const evt = await createOutlookEvent({
-          roomName:    room.name,
-          roomEmail:   settings.roomEmails?.[room.id] || "",
-          bookerName:  form.name,
+          roomName: room.name,
+          roomMailbox: room.mailbox,
+          bookerName: form.name,
           bookerEmail: form.email,
           emailList:   form.emails,
           date:        activeDate,
@@ -819,6 +856,9 @@ export default function App() {
                             {booking.attendeeCount > 0 && <span title={`${booking.attendeeCount} attendees`}> 👥{booking.attendeeCount}</span>}
                             {isOwn && <span className="own-tag">you</span>}
                           </div>
+                          {(!booking.synced || !booking.organizerEmail || booking.organizerEmail.toLowerCase() === (userInfo?.mail || userInfo?.userPrincipalName || "").toLowerCase()) && (
+                            <button className="cancel-btn" onClick={()=>handleCancel(room.id,value)} title="Cancel">✕</button>
+                          )}
                         </div>
                       </div>
                     );
